@@ -5,12 +5,13 @@ from datetime import datetime, timezone
 import logging
 import os
 from typing import Union
+import uuid
 
 class Resource(object):
     """
     Represents a resource allocated to a sensor node operation.
     """
-    def __init__(self, pid: str, op_uuid: str, type: str, model: Union[str, None] = None, serial: Union[str, None] = None, logger: logging.Logger = None) -> None:
+    def __init__(self, pid: str, op_uuid: str, type: str, model: Union[str, None] = None, serial: Union[str, None] = None, logger: logging.Logger = logging.getLogger(__name__)) -> None:
         """
         Initialize the resource parameters.
 
@@ -132,5 +133,5 @@ def resource_available(type: str, model: Union[str, None] = None, serial: Union[
     bool
         True if the resource is available, False otherwise.
     """
-    res = Resource(None, None, type, model, serial)
+    res = Resource(str(os.getpid()), str(uuid.uuid4()), type, model, serial)
     return not os.path.exists(res.lock_filename)

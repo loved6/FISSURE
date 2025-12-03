@@ -23,19 +23,24 @@ async def test_op(cls, parameters: dict, resource_args: dict = {}, logger: loggi
 
     # display parameters, resources, and interfaces
     params = cls.get_arguments(logger)
-    logger.info('\n\nParameters:')
+    logger.info('\nClass Parameters:')
     for k, v in params.items():
         logger.info(f"'{k}': {v}")
     logger.info('\n\n')
 
+    logger.info("\nInput Parameters:")
+    for k, v in parameters.items():
+        logger.info(f"'{k}': {v}")
+    logger.info('\n\n')
+
     resources = cls.get_resources(**resource_args)
-    logger.info('\n\nResources:')
+    logger.info('\nClass Resources:')
     for k, v in resources.items():
         logger.info(f"'{k}': {v}")
     logger.info('\n\n')
 
     interfaces = cls.get_interfaces()
-    logger.info('\n\nInterfaces:')
+    logger.info('\nClass Interfaces:')
     for k, v in interfaces.items():
         logger.info(f"'{k}': {v}")
     logger.info('\n\n')

@@ -105,7 +105,7 @@ def run_decorator(func):
         return
     return wrapper
 
-def stop_decorator(func) -> None:
+def stop_decorator(func) -> object:
     async def wrapper(self) -> None:
         self.logger.info(f"Stopping {self.__class__.__name__}...")
         self._stop = True
@@ -116,7 +116,7 @@ def stop_decorator(func) -> None:
         self.logger.info(f"{self.__class__.__name__} stopped.")
     return wrapper
 
-def teardown_decorator(func) -> None:
+def teardown_decorator(func) -> object:
     async def wrapper(self) -> None:
         self.logger.info(f"Tearing down operation environment for {self.__class__.__name__}...")
 
@@ -177,7 +177,7 @@ def operation_class_decorator(cls):
 class Operation(object):
     """Base class for plugin operations.
     """
-    def __init__(self, sensor_node_id: Union[int, str] = 0, logger: logging.Logger = logging.getLogger(__name__), alert_callback: callable = None, tak_cot_callback: callable = None) -> None:
+    def __init__(self, sensor_node_id: Union[int, str] = 0, logger: logging.Logger = logging.getLogger(__name__), alert_callback: object = None, tak_cot_callback: object = None) -> None:
         """Initialize the Operation class.
 
         Parameters
@@ -200,6 +200,12 @@ class Operation(object):
             tak_cot_callback = send_tak_cot
         self.alert_callback = alert_callback
         self.tak_cot_callback = tak_cot_callback
+
+        # class attributes
+        self.opid = str(uuid.uuid4())
+        self._running = None
+        self._stop = False
+        self.resource_args = {}
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -343,7 +349,7 @@ class Operation(object):
         self.logger.info(f"Resources defined: {resources}")
         self.resources = [
             Resource(
-                pid=os.getpid(),
+                pid=str(os.getpid()),
                 op_uuid=self.opid,
                 type=res_info.get('type'),
                 model=res_info.get('model'),
@@ -376,14 +382,14 @@ class Operation(object):
         """
         self.logger.warning("The run() method should be implemented by the subclass.")
 
-    def running(self) -> bool:
+    def running(self) -> Union[bool, None]:
         """
         Check if operation is running.
 
         Returns
         -------
-        bool
-            True if the operation is running, False otherwise.
+        Union[bool, None]
+            True if the operation is running, False if it is stopped, None if it has not started yet.
         """
         return self._running
 
