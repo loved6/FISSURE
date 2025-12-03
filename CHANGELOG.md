@@ -1,6 +1,56 @@
 # Change Log
 All notable changes to this project will be documented in this file.
 
+## 2025-12-02
+
+Adding callsigns to TAK CoT messages and using long UUID for IP nodes.
+
+### Added
+
+- Callsign prefix in YAML config file for CoT messages
+
+### Changed
+
+- Removed UUID from message envelopes coming from sensor nodes
+- Set IDENTIFIER constant to UUID value in sensor nodes
+- Using 8 character identifier for Meshtastic connections
+- Inserted uuid variable into all HIPRFISR callbacks as part of read_sensor_node_messages()
+- Removed uuid from message PARAMETERS coming from the sensor node since it is in the identifier
+
+### Fixed
+
+- Added checks to exit the connect loop and not print warnings continuously when running a headless HIPRFISR
+- Removed resolving identities from Dashboard mappings for TAK operations
+
+## 2025-12-01
+
+Switching IP node connection to ROUTER-DEALER and fixing shutdown procedures.
+
+### Added
+
+- Replaced ZMQ PAIR with ROUTER-DEALER
+- HIPRFISR/hub no longer sends heartbeats to nodes
+- Nodes send more information in heartbeats
+- HIPRFISR/hub maps dashboard slots to node UUIDs and stores node info by UUID
+- Message from nodes contain UUID
+- New Dashboard widgets for connecting to sensor nodes
+- Code in README for killing all FISSURE related programs in one line
+- Added more password prompt exceptions to the list
+
+### Changed
+
+- Changed default remote sensor node heartbeat and message ports to 6100 and 6101 to not overlap with HIPRFISR ports when sharing an IP
+- Heartbeats transmit their interval in each message
+- Sensor Node reads its config file for heartbeat_interval
+- UUID is written to a file in ~/.fissure directory for local and remote nodes
+
+### Fixed
+
+- Revamped shutdown and task cleanup
+- Error in operations.py when not passing in all the expected arguments
+- Added aircrack-ng from source to installer for raspberry pi setups
+- Simplified hardware select dialog functions that listed all widgets for every tab
+
 ## 2025-11-12
 
 Adjusting GPS behavior, adding saved and internet GPS source options.

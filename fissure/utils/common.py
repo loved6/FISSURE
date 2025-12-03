@@ -247,23 +247,89 @@ def get_authenticator(allowed_keys: str = None) -> zmq.auth.asyncio.AsyncioAuthe
     return __vars.zmq_authenticator
 
 
-def zmq_cleanup():  # pragma: no cover
+def authenticator_cleanup():
     """
-    Clean up ZMQ Context and stop the Authenticator
     """
-    logger: logging.Logger = logging.getLogger("fissure")
-    logger.debug("Cleaning Up ZMQ Context")
-    if __vars.zmq_authenticator is not None:
-        __vars.zmq_authenticator.stop()
+    auth = get_authenticator()
+    if auth is not None:
+        try:
+            auth.stop()
+        except:
+            pass
 
-        del __vars.zmq_authenticator
-        __vars.zmq_authenticator = None
 
-    if __vars.zmq_ctx is not None:
-        # __vars.zmq_ctx.destroy(linger=0)
+def zmq_cleanup():
+    # Stop the authenticator if it exists
+    try:
+        if __vars.zmq_authenticator is not None:
+            __vars.zmq_authenticator.stop()
+            __vars.zmq_authenticator = None
+    except Exception:
+        pass
 
-        del __vars.zmq_ctx
-        __vars.zmq_ctx = None
+    # Destroy ZMQ context if it exists
+    try:
+        if __vars.zmq_ctx is not None:
+            __vars.zmq_ctx.destroy(linger=0)
+            __vars.zmq_ctx = None
+    except Exception:
+        pass
+
+
+    # For Brute Forcing Socket Close:
+    # import gc
+    # print("ZMQ cleanup starting")
+
+    # raw_sockets = set()
+    # async_sockets = set()
+
+    # # Collect sockets
+    # for obj in gc.get_objects():
+    #     try:
+    #         if isinstance(obj, zmq.asyncio.Socket):
+    #             async_sockets.add(obj)
+    #         elif isinstance(obj, zmq.Socket):
+    #             raw_sockets.add(obj)
+    #     except:
+    #         pass
+
+    # print("\n=== SOCKETS BEFORE CLOSE ===")
+    # for s in async_sockets:
+    #     print("ASYNC SOCKET:", s, "closed=", s.closed)
+    # for s in raw_sockets:
+    #     print("RAW SOCKET:", s, "closed=", s.closed)
+
+    # # 1) Close asyncio wrappers AND their underlying raw sockets
+    # print("\nClosing async sockets:")
+    # for s in async_sockets:
+    #     try:
+    #         if hasattr(s, "socket"):
+    #             try:
+    #                 print("  closing underlying raw:", s.socket)
+    #                 s.socket.close(linger=0)
+    #             except Exception as e:
+    #                 print("    raw close error:", e)
+    #         print("  closing async:", s)
+    #         s.close(linger=0)
+    #     except Exception as e:
+    #         print("  async close error:", e)
+
+    # # 2) Close any raw sockets not already closed
+    # print("\nClosing raw sockets:")
+    # for s in raw_sockets:
+    #     if not s.closed:
+    #         try:
+    #             print("  closing:", s)
+    #             s.close(linger=0)
+    #         except Exception as e:
+    #             print("  raw close error:", e)
+
+    # # 3) Now destroy context
+    # try:
+    #     __vars.zmq_ctx.destroy(linger=0)
+    #     print("Context destroyed.")
+    # except Exception as e:
+    #     print("Destroy error:", e)
 
 
 def load_yaml(filename: str) -> Optional[Dict]:

@@ -78,7 +78,7 @@ async def stopTSI_FE(component: object):
     """
     # Stop the Thread
     component.logger.info("Stopping TSI Feature Extractor...")
-    component.fe_running = True
+    component.fe_running = False
 
 
 async def updateLoggingLevels(component: object, new_console_level="", new_file_level=""):
@@ -95,4 +95,8 @@ async def updateFISSURE_Configuration(component: object, settings_dict={}):
     """
     # Update FGE Dictionary
     component.fissure_settings = settings_dict
-    
+
+
+async def shutdown(component: object, identifiers=[]):
+    component.logger.info("TSI received shutdown command")
+    component.shutdown = True

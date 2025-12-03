@@ -1596,7 +1596,24 @@ cp """ + fissure_directory + """/Tools/LTE-ciphercheck/ciphercheck.conf ../srsue
 
 # Aircrack-ng
 programs_ubuntu24_04.append(('Aircrack-ng (4.06 MB)',
-"""sudo apt-get install -y aircrack-ng
+"""output=$(uname -a)
+if echo "$output" | grep -qi "raspi"; then
+sudo apt-get install -y libssl-dev libnl-3-dev libnl-genl-3-dev pkg-config
+  mkdir -p ~/Installed_by_FISSURE
+  cd ~/Installed_by_FISSURE
+  wget https://download.aircrack-ng.org/aircrack-ng-1.7.tar.gz
+  tar -xzf aircrack-ng-1.7.tar.gz
+  rm aircrack-ng-1.7.tar.gz
+  cd aircrack-ng-1.7/
+  autoreconf -i
+  ./configure
+  make
+  sudo make install
+  sudo ldconfig
+else
+  sudo apt-get install -y aircrack-ng
+fi
+
 ########## Verify ##########
 aircrack-ng --help
 """,True,'802.11'))

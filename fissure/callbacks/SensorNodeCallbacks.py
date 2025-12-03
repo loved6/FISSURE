@@ -27,9 +27,12 @@ async def updateLoggingLevels(component: object, new_console_level="", new_file_
 
 async def hiprfisrDisconnecting(component: object):
     """
-    Stop trying to send data and heartbeats to the HIPRFISSR on an intentional disconnect.
+    HIPRFISR is intentionally disconnecting from this Sensor Node.
+    Stop sending messages, mark connection down, and shut down socket cleanly.
     """
-    # Stop Outgoing Messages
+    component.logger.info("Received hiprfisrDisconnecting")
+
+    # Mark HIPRFISR as disconnected
     component.hiprfisr_connected = False
 
 
@@ -787,11 +790,14 @@ async def stopPD(component: object, sensor_node_id=0):
 
 async def terminateSensorNode(component: object):
     """
-    Stops sensor_node.py for local operations.
+    Stops sensor_node.py entirely (local or remote) by triggering shutdown.
     """
-    # Exit
-    component.logger.info("sensor node shutdown")
+    component.logger.info("terminateSensorNode callback triggered — shutting down sensor node")
+
+    # Tell begin loop to exit
     component.shutdown = True
+
+    # Let task termination and socket shutdown fall naturally through the checks at the end of begin()
 
 
 async def recallSettings(component: object):
@@ -807,6 +813,29 @@ async def recallSettings(component: object):
 
     # Send the Message
     PARAMETERS = {"settings_dict": settings_dict}
+    msg = {
+        fissure.comms.MessageFields.IDENTIFIER: component.identifier,
+        fissure.comms.MessageFields.MESSAGE_NAME: "recallSettingsReturn",
+        fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
+    }
+    await component.hiprfisr_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+
+async def nodeSelectIP(component: object, dashboard_node_index):
+    """
+    Recall default settings from a local yaml file and send to HIPRFISR.
+    """
+    # Recall Default Settings Saved Locally
+    component.logger.info("nodeSelectIP/Recall Settings")
+    filename = os.path.join(fissure.utils.SENSOR_NODE_DIR, "Sensor_Node_Config", "default.yaml")
+    with open(filename) as yaml_library_file:
+        settings_dict = yaml.load(yaml_library_file, yaml.FullLoader)
+
+    # Send the Message
+    PARAMETERS = {
+        "dashboard_node_index": dashboard_node_index,
+        "settings_dict": settings_dict
+    }
     msg = {
         fissure.comms.MessageFields.IDENTIFIER: component.identifier,
         fissure.comms.MessageFields.MESSAGE_NAME: "recallSettingsReturn",
@@ -908,7 +937,7 @@ async def probeHardware(component: object, tab_index=0, table_row_text=[]):
     await component.hiprfisr_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
 
 
-async def scanHardware(component: object, tab_index=0, hardware_list=[]):
+async def scanHardware(component: object, hardware_list=[]):
     """
     Scans all types of hardware included in the hardware_list and returns the information.
     """
@@ -956,7 +985,9 @@ async def scanHardware(component: object, tab_index=0, hardware_list=[]):
             all_scan_results.append(fissure.utils.hardware.findCaribouLite())            
 
     # Return Scan Results
-    PARAMETERS = {"tab_index": tab_index, "hardware_scan_results": all_scan_results}
+    PARAMETERS = {
+        "hardware_scan_results": all_scan_results
+    }
     msg = {
         fissure.comms.MessageFields.IDENTIFIER: component.identifier,
         fissure.comms.MessageFields.MESSAGE_NAME: "hardwareScanResults",
@@ -1573,7 +1604,7 @@ async def cpuIP(component: object, sensor_node_id: str):
     # Get CPU Percentage
     cpu_result = subprocess.check_output("top -bn1 | grep 'Cpu(s)' | awk '{print $2 + $4}'", shell=True, text=True).strip()
     cpu_result = f"{cpu_result}%"
-    
+
     # Send Status
     PARAMETERS = {
         "sensor_node_id": sensor_node_id,

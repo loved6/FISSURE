@@ -168,8 +168,13 @@ def operation_class_decorator(cls):
         cls.__init_original = cls.__init__
         cls.__init__ = dec_init
         cls.__init__.__doc__ = cls.__init_original.__doc__
-        cls.__init__.__type_params__ = cls.__init_original.__type_params__
-        cls.__init__.__kwdefaults__ = cls.__init_original.__kwdefaults__
+
+        # Safely copy optional metadata
+        if hasattr(cls.__init_original, "__type_params__"):
+            cls.__init__.__type_params__ = cls.__init_original.__type_params__
+
+        if hasattr(cls.__init_original, "__kwdefaults__"):
+            cls.__init__.__kwdefaults__ = cls.__init_original.__kwdefaults__
 
     return cls
 

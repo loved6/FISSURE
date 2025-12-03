@@ -14,11 +14,12 @@ Sensor Node:
                latitude: 40.712776
                longitude: -74.005974
                altitude: 10.5
-          gps_source: gpsd           # Options: gpsd, Meshtastic, saved, internet
+          gps_source: saved           # Options: gpsd, Meshtastic, saved, internet
           gps_update_interval_seconds: 20  # 300
           gpsd_serial_port: '/dev/ttyACM0'
-     hb_port: '5051'     
-     ip_address: '127.0.0.1'               # '127.0.0.1' for local, anything else for remote
+     heartbeat_interval: 5
+     hb_port: "6100"
+     ip_address: '192.168.1.128'               # '127.0.0.1' for local, anything else for remote
      iq:
           0:
                daughterboard: ''
@@ -28,11 +29,11 @@ Sensor Node:
                serial: ''
                type: ''
                uid: ''
-     local_remote: local                   # Does not need to be set, updated during init, "remote" or "local"
+     local_remote: remote                   # Does not need to be set, updated during init, "remote" or "local"
      location: Location text
-     msg_port: '5052'
+     msg_port: "6101"
      network_type: IP                      # "IP" or "Meshtastic"
-     nickname: Local Sensor Node           # "Local Sensor Node" for local, anything else for remote
+     nickname: Remote1
      notes: Notes text
      pd: ''
      meshtastic_serial_port: '/dev/ttyACM0'  # Typically /dev/ttyACM0, /dev/tty/USB0 (make sure gpsd service does not grab port)

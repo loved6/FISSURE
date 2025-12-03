@@ -244,4 +244,9 @@ async def updateFISSURE_Configuration(component: object, settings_dict={}):
     # Update FISSURE Settings
     component.settings_dictionary = settings_dict  #self.loadConfiguration()
 
+
+async def shutdown(component: object, identifiers=[]):
+    component.logger.info("PD received shutdown command")
+    component.shutdown = True
+
 # ############################# Test #####################################

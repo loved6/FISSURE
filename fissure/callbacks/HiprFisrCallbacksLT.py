@@ -319,7 +319,10 @@ async def takPlotLT(component: object, msg=[]):
 
     time = time.replace(" ", "T")
     
-    await component.send_cot(uid, lat, lon, alt, time, remarks, type)
+    prefix = component.settings['callsign_prefix']
+    callsign = component.nodes[uid].get('callsign', f"{prefix}-{uid[:8]}")
+
+    await component.send_cot(uid, callsign, lat, lon, alt, time, remarks, type)
     
 
 async def exploitLT(component: object, msg=[]):
@@ -357,8 +360,11 @@ async def takPlotGpsUpdateLT(component: object, msg=[]):
     time = time.replace(" ", "T")
 
     max_history = 5
+    
+    prefix = component.settings['callsign_prefix']
+    callsign = component.nodes[uid].get('callsign', f"{prefix}-{uid[:8]}")
 
-    await component.sensor_node_tracker.send_cot_gps_update(uid, lat, lon, alt, time, remarks, max_history)
+    await component.sensor_node_tracker.send_cot_gps_update(uid, callsign, lat, lon, alt, time, remarks, max_history)
 
 
 async def gpsBeaconEnableMeshtasticLT(component: object, sensor_node_id: str):

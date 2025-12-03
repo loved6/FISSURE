@@ -48,13 +48,19 @@ class FissureZMQNode(ABC):
         :param name: name of the component to which the node belongs
         :type name: str
         """
+        self.terminated = False
         self.parent_component = name.split("::")[0] if "::" in name else name
         self.name = name.split("::")[1] if "::" in name else name
 
         # ZMQ Setup
         self.sock_type: zmq.SocketType = sock_type
         self.sockid = None
-        self.ctx: zmq.Context = fissure.utils.get_zmq_context()
+        if sock_type == zmq.PAIR:
+            # Dedicated context per PAIR socket = mandatory for clean reconnects
+            self.ctx = zmq.asyncio.Context()
+        else:
+            # Shared context for all other socket patterns
+            self.ctx = fissure.utils.get_zmq_context()
         self.heartbeat_channel = zmq.asyncio.Socket(self.ctx, socket_type=self.sock_type)
         self.message_channel = zmq.asyncio.Socket(self.ctx, socket_type=self.sock_type)
 
@@ -94,14 +100,21 @@ class FissureZMQNode(ABC):
         :param target_ids: socket IDs of intended recipients, defaults to None (for sending from ROUTER sockets)
         :type target_ids: Optional[List[str]]
         """
-        if self.sock_type == zmq.ROUTER:
-            for id in target_ids:
-                if id is not None:
-                    encoded_id = id.encode()
-                    encoded_msg = json.dumps(msg).encode()
-                    await self.heartbeat_channel.send_multipart([encoded_id, encoded_msg])
-        else:
-            await self.heartbeat_channel.send_json(msg)
+        if self.terminated:
+            self.logger.error(f"{self.name} send_heartbeat aborted because terminated=True")
+            return
+        try:
+            if self.sock_type == zmq.ROUTER:
+                for id in target_ids:
+                    if id is not None:
+                        encoded_id = id.encode()
+                        encoded_msg = json.dumps(msg).encode()
+                        await self.heartbeat_channel.send_multipart([encoded_id, encoded_msg])
+            else:
+                await self.heartbeat_channel.send_json(msg)
+        except Exception as e:
+            self.logger.warning(f"{self.name} send_heartbeat error: {e}")
+            self.terminated = True
 
 
     async def send_msg(self, msg_type: str, msg: Dict, target_ids: Optional[List[str]] = None, **kwargs):
@@ -115,61 +128,68 @@ class FissureZMQNode(ABC):
         :param target_ids: socket IDs of intended recipients, defaults to None
         :type target_ids: Optional[List[str]]
         """
-        msg[MessageFields.TYPE] = msg_type
+        if self.terminated:
+            return
+        
+        try:
+            msg[MessageFields.TYPE] = msg_type
 
-        if self.sock_type == zmq.ROUTER:
-            for id in target_ids:
-                if id is not None:
-                    encoded_id = id.encode()
-                    encoded_msg = json.dumps(msg).encode()
-                    await self.message_channel.send_multipart([encoded_id, encoded_msg])
+            if self.sock_type == zmq.ROUTER:
+                for id in target_ids:
+                    if id is not None:
+                        encoded_id = id.encode()
+                        encoded_msg = json.dumps(msg).encode()
+                        await self.message_channel.send_multipart([encoded_id, encoded_msg])
 
-                    # Ignore Message Parameters in Logging
-                    if msg_type == "Commands":
-                        if msg["MessageName"] in fissure.utils.BANNED_MESSAGE_NAMES:
-                            log_message = msg.copy()
-                            log_message.pop("Parameters", None)
+                        # Ignore Message Parameters in Logging
+                        if msg_type == "Commands":
+                            if msg["MessageName"] in fissure.utils.BANNED_MESSAGE_NAMES:
+                                log_message = msg.copy()
+                                log_message.pop("Parameters", None)
+                            else:
+                                log_message = msg
+
+                            # Log Messages
+                            if self.logger.isEnabledFor(logging.INFO):
+                                if target_ids:
+                                    identifiers = [tid.split('-')[0] for tid in target_ids]
+                                    identifier_str = ', '.join(identifiers)
+                                    self.logger.info(f"[{self.name}] sent message: {log_message['MessageName']} to [{identifier_str}]")
+                                else:
+                                    self.logger.info(f"[{self.name}] sent message: {log_message['MessageName']}")
+                            self.logger.debug(f"[{self.name}] sent message: {log_message}" + (f" to {target_ids}" if target_ids else ""))                       
+                        
+                        # Other Types
                         else:
-                            log_message = msg
-
-                        # Log Messages
-                        if self.logger.isEnabledFor(logging.INFO):
-                            if target_ids:
-                                identifiers = [tid.split('-')[0] for tid in target_ids]
-                                identifier_str = ', '.join(identifiers)
-                                self.logger.info(f"[{self.name}] sent message: {log_message['MessageName']} to [{identifier_str}]")
-                            else:
-                                self.logger.info(f"[{self.name}] sent message: {log_message['MessageName']}")
-                        self.logger.debug(f"[{self.name}] sent message: {log_message}" + (f" to {target_ids}" if target_ids else ""))                       
-                    
-                    # Other Types
-                    else:
-                        # Log Messages
-                        if self.logger.isEnabledFor(logging.INFO):
-                            if target_ids:
-                                identifiers = [tid.split('-')[0] for tid in target_ids]
-                                identifier_str = ', '.join(identifiers)
-                                self.logger.info(f"[{self.name}] sent message: {msg['MessageName']} to [{identifier_str}]")
-                            else:
-                                self.logger.info(f"[{self.name}] sent message: {msg['MessageName']}")
-                        self.logger.debug(f"[{self.name}] sent message: {msg}" + (f" to {target_ids}" if target_ids else ""))
-        else:
-            await self.message_channel.send_json(msg)
-
-            # Ignore Message Parameters in Logging
-            if msg_type == "Commands":
-                if msg["MessageName"] in fissure.utils.BANNED_MESSAGE_NAMES:
-                    log_message = msg.copy()
-                    log_message.pop("Parameters", None)
-                else:
-                    log_message = msg
-                if self.logger.isEnabledFor(logging.INFO):
-                    self.logger.info(f"[{self.name}] sent message: {msg['MessageName']}" + (f" to {target_ids}" if target_ids else ""))
-                self.logger.debug(f"[{self.name}] sent message: {log_message}" + (f" to {target_ids}" if target_ids else ""))
+                            # Log Messages
+                            if self.logger.isEnabledFor(logging.INFO):
+                                if target_ids:
+                                    identifiers = [tid.split('-')[0] for tid in target_ids]
+                                    identifier_str = ', '.join(identifiers)
+                                    self.logger.info(f"[{self.name}] sent message: {msg['MessageName']} to [{identifier_str}]")
+                                else:
+                                    self.logger.info(f"[{self.name}] sent message: {msg['MessageName']}")
+                            self.logger.debug(f"[{self.name}] sent message: {msg}" + (f" to {target_ids}" if target_ids else ""))
             else:
-                if self.logger.isEnabledFor(logging.INFO):
-                    self.logger.info(f"[{self.name}] sent message: {msg['MessageName']}" + (f" to {target_ids}" if target_ids else ""))
-                self.logger.debug(f"[{self.name}] sent message: {msg}" + (f" to {target_ids}" if target_ids else ""))
+                await self.message_channel.send_json(msg)
+
+                # Ignore Message Parameters in Logging
+                if msg_type == "Commands":
+                    if msg["MessageName"] in fissure.utils.BANNED_MESSAGE_NAMES:
+                        log_message = msg.copy()
+                        log_message.pop("Parameters", None)
+                    else:
+                        log_message = msg
+                    if self.logger.isEnabledFor(logging.INFO):
+                        self.logger.info(f"[{self.name}] sent message: {msg['MessageName']}" + (f" to {target_ids}" if target_ids else ""))
+                    self.logger.debug(f"[{self.name}] sent message: {log_message}" + (f" to {target_ids}" if target_ids else ""))
+                else:
+                    if self.logger.isEnabledFor(logging.INFO):
+                        self.logger.info(f"[{self.name}] sent message: {msg['MessageName']}" + (f" to {target_ids}" if target_ids else ""))
+                    self.logger.debug(f"[{self.name}] sent message: {msg}" + (f" to {target_ids}" if target_ids else ""))
+        except Exception as e:
+            self.logger.warning(f"{self.name} send_msg error: {e}")
+            self.terminated = True
 
 
     async def recv_heartbeat(self) -> Optional[Dict]:
@@ -179,17 +199,37 @@ class FissureZMQNode(ABC):
         :return: received heartbeat message or None if no message was received
         :rtype: Dict or None
         """
-        msgrcvd = None
-        if await self.heartbeat_channel.poll(POLL_TIMEOUT):
+        if self.terminated:
+            return None
+
+        try:
+            # poll only tells you *something happened*, not that a full message is readable
+            events = await self.heartbeat_channel.poll(POLL_TIMEOUT)
+
+            if not events:
+                return None
+
             if self.sock_type == zmq.ROUTER:
-                rcvd = await self.heartbeat_channel.recv_multipart()
-                sender_id, msgrcvd = rcvd[0], rcvd[1].decode()
-                msgrcvd = json.loads(msgrcvd)
-                if msgrcvd is not None and sender_id is not None:
-                    msgrcvd[MessageFields.SENDER_ID] = sender_id.decode()
+                try:
+                    rcvd = await self.heartbeat_channel.recv_multipart(flags=zmq.NOBLOCK)
+                except zmq.Again:
+                    return None
+
+                sender_id, payload = rcvd[0], rcvd[1].decode()
+                msg = json.loads(payload)
+                msg[MessageFields.SENDER_ID] = sender_id.decode()
+                return msg
+
             else:
-                msgrcvd = await self.heartbeat_channel.recv_json()
-        return msgrcvd
+                try:
+                    return await self.heartbeat_channel.recv_json(flags=zmq.NOBLOCK)
+                except zmq.Again:
+                    return None
+
+        except Exception as e:
+            self.logger.warning(f"{self.name} recv_heartbeat error: {e}")
+            self.terminated = True
+            return None
 
 
     async def recv_heartbeats(self) -> List[Optional[Dict]]:
@@ -199,11 +239,21 @@ class FissureZMQNode(ABC):
         :return: received heartbeats
         :rtype: List[Optional[Dict]]
         """
+        if self.terminated:
+            return []
+
         heartbeats = []
-        rcvd = await self.recv_heartbeat()
-        while rcvd is not None:
-            heartbeats.append(rcvd)
-            rcvd = await self.recv_heartbeat()
+
+        while True:
+            try:
+                msg = await self.recv_heartbeat()
+                if msg is None:
+                    break
+                heartbeats.append(msg)
+
+            except Exception:
+                break
+
         return heartbeats
 
 
@@ -298,7 +348,14 @@ class FissureZMQNode(ABC):
             return await cb(context, *params)
         else:
             if type(params) is dict:  # Dictionary Params
-                return await cb(context, **params)
+                import inspect
+                sig = inspect.signature(cb)
+
+                filtered_params = {
+                    k: v for k, v in params.items()
+                    if k in sig.parameters
+                }
+                return await cb(context, **filtered_params)
             elif type(params) is list:  # List Params
                 return await cb(context, *params)
             elif type(params) is str:  # Space Separated String Params
@@ -307,6 +364,32 @@ class FissureZMQNode(ABC):
                 self.warning.logger(
                     f"[{self.name}] received callback ({cb_name}) with unrecognized parameters: {params}"
                 )
+
+
+    def close_sockets(self):
+        try:
+            self.heartbeat_channel.setsockopt(zmq.LINGER, 0)
+            self.message_channel.setsockopt(zmq.LINGER, 0)
+        except:
+            pass
+        try:
+            self.heartbeat_channel.close(0)
+        except:
+            pass
+        try:
+            self.message_channel.close(0)
+        except:
+            pass
+    
+
+    # def close_context(self):
+    #     """
+    #     Only call once from a single location at the very end. Don't call/create this function. Leaving it here as a reminder.
+    #     """
+    #     try:
+    #         self.ctx.destroy(linger=0)
+    #     except:
+    #         pass
 
 
 class Server(FissureZMQNode):
@@ -334,6 +417,7 @@ class Server(FissureZMQNode):
         """
         self.address = address
         super().__init__(sock_type=sock_type, name=name)
+        self.terminated = False
         self.logger.debug(f"[{self.name}] initialized")
 
 
@@ -341,7 +425,7 @@ class Server(FissureZMQNode):
         """
         Create ZMQ Authenicator, configure to allow CURVE connections from ANY domain (subject to publickey auth)
         """
-        self.authenticator = fissure.utils.get_authenticator(self.allowed_keys)
+        self.authenticator = fissure.utils.get_authenticator(self.allowed_keys)  # Stopped in common utils.zmq_cleanup()
 
         private_key = os.path.join(self.certs, SERVER, "server.key_secret")
 
@@ -375,17 +459,32 @@ class Server(FissureZMQNode):
                     self.logger.debug(msg)
                 except Exception:
                     pass
+        
+        # Mark as Terminated
+        self.terminated = True
 
         # Close sockets
-        self.heartbeat_channel.setsockopt(zmq.LINGER, 0)
-        self.message_channel.setsockopt(zmq.LINGER, 0)
-
-        if not (self.heartbeat_channel.closed or self.message_channel.closed):
-            if self.heartbeat_channel.closed is False:
+        try:
+            self.heartbeat_channel.setsockopt(zmq.LINGER, 0)
+        except:
+            pass
+        try:
+            if not self.heartbeat_channel.closed:
                 self.heartbeat_channel.close()
-            if self.message_channel.closed is False:
+        except:
+            pass
+
+        try:
+            self.message_channel.setsockopt(zmq.LINGER, 0)
+        except:
+            pass
+        try:
+            if not self.message_channel.closed:
                 self.message_channel.close()
-            safe_debug(f"[{self.name}] shutdown ({self.address})")
+        except:
+            pass
+
+        safe_debug(f"[{self.name}] shutdown ({self.address})")
 
         # Cleanup IPC sockets
         if self.address.protocol == "ipc":
@@ -426,6 +525,7 @@ class Listener(FissureZMQNode):
         """
         self.connections = set()
         super().__init__(sock_type=sock_type, name=name)
+        self.terminated = False
         self.logger.debug(f"[{self.name}] initialized")
 
 
@@ -494,20 +594,8 @@ class Listener(FissureZMQNode):
         await self.send_msg(MessageTypes.STATUS, connect_msg)
         self.connections.add(server_addr)
         self.logger.debug(f"[{self.name}] connected to {server_addr}")
+
         return True
-        # now = time.time()
-        # start_time = now
-        # while timeout >= (now - start_time):
-        #     response = await self.recv_msg()
-        #     if (
-        #         (response is not None)
-        #         and (response.get(MessageFields.TYPE) == fissure.comms.MessageTypes.STATUS)
-        #         and (response.get(MessageFields.MESSAGE_NAME) == "OK")
-        #     ):
-        #         self.connections.add(server_addr)
-        #         self.logger.debug(f"[{self.name}] connected to {server_addr}")
-        #         return True
-        #     now = time.time()
 
 
     def disconnect(self, server_addr: Address):
@@ -544,20 +632,47 @@ class Listener(FissureZMQNode):
                 except Exception:
                     pass
         
+        # Mark as Terminated
+        self.terminated = True
+
         # Disconnect from all connected servers
         for server in list(self.connections):  # Iterate over a copy of the set
             self.disconnect(server)  # pragma: no cover
 
         # Close sockets cleanly
+        # Close heartbeat_channel
         try:
             self.heartbeat_channel.setsockopt(zmq.LINGER, 0)
-            self.message_channel.setsockopt(zmq.LINGER, 0)
-        except Exception:
+        except:
             pass
-
-        if not (self.heartbeat_channel.closed or self.message_channel.closed):
+        try:
             if not self.heartbeat_channel.closed:
                 self.heartbeat_channel.close()
+        except:
+            pass
+
+        # Close message_channel
+        try:
+            self.message_channel.setsockopt(zmq.LINGER, 0)
+        except:
+            pass
+        try:
             if not self.message_channel.closed:
                 self.message_channel.close()
-            safe_debug(f"[{self.name}] shutdown")
+        except:
+            pass
+
+
+    async def recv_msg_with_id(self):
+        """
+        Wrapper so HIPRFISR can uniformly receive (msg, identity)
+        even though DEALER sockets do NOT include sender identity.
+        """
+        msg = await self.recv_msg()
+
+        # Always return a tuple, even if empty
+        if msg is None:
+            return None, None
+
+        identity = getattr(self, "sockid", None)
+        return msg, identity

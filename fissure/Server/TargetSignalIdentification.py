@@ -80,6 +80,7 @@ class TargetSignalIdentification:
             fissure.comms.Identifiers.TSI: None,
         }
         self.hiprfisr_connected = False
+        self.child_tasks = []
 
         # Initialze ZMQ Nodes
         self.initialize_comms()
@@ -108,17 +109,11 @@ class TargetSignalIdentification:
 
     async def shutdown_comms(self):
         """
-        Send shutdown notice, disconnect and shutdown ZMQ sockets
+        Close ZMQ sockets
         """
-        shutdown_notice = {
-            fissure.comms.MessageFields.IDENTIFIER: self.identifier,
-            fissure.comms.MessageFields.MESSAGE_NAME: "Shutting Down",
-            fissure.comms.MessageFields.PARAMETERS: "",
-        }
-        await self.hiprfisr_socket.send_msg(fissure.comms.MessageTypes.STATUS, shutdown_notice)
-
-        self.hiprfisr_socket.disconnect(self.hiprfisr_address)
-        self.hiprfisr_socket.shutdown()
+        # Close Heartbeats and Messages
+        self.hiprfisr_socket.close_sockets()  # Faster, everything is already cleaned up
+        # self.hiprfisr_socket.shutdown()  # Creates a timeout situation and delays closing
 
 
     def register_callbacks(self, ctx: ModuleType):
@@ -156,12 +151,12 @@ class TargetSignalIdentification:
 
         # Start Heartbeat Loop
         heartbeat_task = asyncio.create_task(self.heartbeat_loop())
+        self.child_tasks.append(heartbeat_task)
 
         # Main Event Loop
         while self.shutdown is False:
             # Process Incoming Messages
             await self.read_HIPRFISR_messages()
-
             await asyncio.sleep(EVENT_LOOP_DELAY)
 
         # Ensure the Heartbeat Loop is Stopped
@@ -179,8 +174,15 @@ class TargetSignalIdentification:
             self.fe_running = False
             await asyncio.sleep(2)
 
+        # Close Running Tasks
+        for task in self.child_tasks:
+            task.cancel()
+        await asyncio.gather(*self.child_tasks, return_exceptions=True)
+
+        # Shut Down Comms
         await self.shutdown_comms()
-        self.logger.info("=== SHUTDOWN ===")
+
+        self.logger.info("=== TSI SHUTDOWN COMPLETE ===")
 
 
     async def send_heartbeat(self):
@@ -236,7 +238,7 @@ class TargetSignalIdentification:
         Receive and parse messages from the HiprFisr and carry out commands
         """
         parsed = ""
-        while parsed is not None:
+        while (parsed is not None) and not self.shutdown:
             parsed = await self.hiprfisr_socket.recv_msg()
             if parsed is not None:
                 type = parsed.get(fissure.comms.MessageFields.TYPE)

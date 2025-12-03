@@ -37,11 +37,20 @@ async def main():
         hiprfisr.begin(),
         pd.begin(),
         tsi.begin(),
+        return_exceptions=True
     )
     await server_tasks
+    # print("SERVER TASKS AFTER AWAIT:", server_tasks)
 
     print("[FISSURE][Server] end")
+
+    # for t in asyncio.all_tasks():
+    #     print("TASK:", t, "| DONE:", t.done(), "| CANCELLED:", t.cancelled())
+
     fissure.utils.zmq_cleanup()
+
+    # for t in asyncio.all_tasks():
+    #     print("TASK:", t, "| DONE:", t.done(), "| CANCELLED:", t.cancelled())
 
 
 if __name__ == "__main__":

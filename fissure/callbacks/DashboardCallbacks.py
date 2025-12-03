@@ -2118,3 +2118,10 @@ async def pingIP_Return(component: object, sensor_node_id:str, ping: str):
     """
     # Open a Text Dialog
     ret = await fissure.Dashboard.UI_Components.Qt5.async_ok_dialog(component.frontend.popups["HardwareSelectDialog"], ping)
+
+
+async def nodeRefreshIP_Return(component: object, dashboard_node_index:str, nodes):
+    """
+    .
+    """
+    component.frontend.popups["HardwareSelectDialog"].refreshNodes(dashboard_node_index=dashboard_node_index, nodes=nodes)

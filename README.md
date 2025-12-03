@@ -393,6 +393,7 @@ If any of the programs freeze or hang on close, the following commands can be us
 sudo ps -aux | grep fissure
 sudo pkill python3
 sudo kill -9 <PID of __main__.py>
+sudo pkill python3 && sudo pkill -9 -f fissure
 ```
 
 **Remote Sensor Node Usage**

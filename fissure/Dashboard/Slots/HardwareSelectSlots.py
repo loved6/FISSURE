@@ -14,6 +14,7 @@ import re
 
 
 @QtCore.pyqtSlot(QtCore.QObject)
+# def importClicked(HWSelect, settings_dict="", recall_settings_on_connect=False):
 def importClicked(HWSelect, settings_dict="", recall_settings_on_connect=False):
     """Import all sensor node information from a .csv file."""
     # Choose File
@@ -187,22 +188,22 @@ def importClicked(HWSelect, settings_dict="", recall_settings_on_connect=False):
                 settings_dict["Sensor Node " + str(n + 1)]["local_remote"] = "local"
                 local_widgets[n].setChecked(True)
                 local_assigned = True
-                local(HWSelect, tab_index=n)
+                # local(HWSelect, tab_index=n)
                 HWSelect.tabWidget_nodes.setTabText(n, "Local Sensor Node")
             else:
                 settings_dict["Sensor Node " + str(n + 1)]["local_remote"] = "remote"
                 remote_widgets[n].setChecked(True)
-                remote(HWSelect, tab_index=n)
+                # remote(HWSelect, tab_index=n)
         else:
             # Loading a YAML File
             if settings_dict["Sensor Node " + str(n + 1)]["local_remote"] == "local":
                 local_widgets[n].setChecked(True)
                 local_assigned = True
-                local(HWSelect, tab_index=n)
+                # local(HWSelect, tab_index=n)
                 HWSelect.tabWidget_nodes.setTabText(n, "Local Sensor Node")
             else:
                 remote_widgets[n].setChecked(True)
-                remote(HWSelect, tab_index=n)
+                # remote(HWSelect, tab_index=n)
 
         # Nickname
         if local_widgets[n].isChecked() == True:
@@ -232,8 +233,8 @@ def importClicked(HWSelect, settings_dict="", recall_settings_on_connect=False):
         ip_widgets[n].setPlainText(settings_dict["Sensor Node " + str(n + 1)]["ip_address"])
 
         # Ports
-        msg_port_widgets[n].setPlainText(settings_dict["Sensor Node " + str(n + 1)]["msg_port"])
-        hb_port_widgets[n].setPlainText(settings_dict["Sensor Node " + str(n + 1)]["hb_port"])
+        msg_port_widgets[n].setPlainText(str(settings_dict["Sensor Node " + str(n + 1)]["msg_port"]))
+        hb_port_widgets[n].setPlainText(str(settings_dict["Sensor Node " + str(n + 1)]["hb_port"]))
 
         # Clear the Tables
         hardware_tsi_widgets[n].setRowCount(0)
@@ -814,31 +815,17 @@ async def guess(HWSelect: QtCore.QObject):
     Cycles through possible values for the selected row in the scan results table.
     """
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    scan_results_tables = [
-        HWSelect.tableWidget_scan_results_1,
-        HWSelect.tableWidget_scan_results_2,
-        HWSelect.tableWidget_scan_results_3,
-        HWSelect.tableWidget_scan_results_4,
-        HWSelect.tableWidget_scan_results_5,
-    ]
-    get_row = scan_results_tables[tab_index].currentRow()
+    scan_results_table = getattr(HWSelect, f"tableWidget_scan_results_{tab_index+1}")
+    get_row = scan_results_table.currentRow()
     get_row_text = []
-    for n in range(0, scan_results_tables[tab_index].columnCount()):
-        get_row_text.append(str(scan_results_tables[tab_index].item(get_row, n).text()))
+    for n in range(0, scan_results_table.columnCount()):
+        get_row_text.append(str(scan_results_table.item(get_row, n).text()))
 
     # Send Message for HIPRFISR to Sensor Node Connections
-
-    # Send Message for HIPRFISR to Sensor Node Connections
-    local_remote_stacked_widgets = [
-        HWSelect.stackedWidget_local_remote_1,
-        HWSelect.stackedWidget_local_remote_2,
-        HWSelect.stackedWidget_local_remote_3,
-        HWSelect.stackedWidget_local_remote_4,
-        HWSelect.stackedWidget_local_remote_5
-    ]
-    if local_remote_stacked_widgets[tab_index].currentIndex() == 2:
+    local_remote_stacked_widget = getattr(HWSelect, f"stackedWidget_local_remote_{tab_index+1}")
+    if local_remote_stacked_widget.currentIndex() == 2:
         await HWSelect.dashboard.backend.guessHardware(str(tab_index), get_row, get_row_text, HWSelect.guess_index)
-    elif local_remote_stacked_widgets[tab_index].currentIndex() == 4:
+    elif local_remote_stacked_widget.currentIndex() == 4:
         await HWSelect.dashboard.backend.guessHardwareLT(str(tab_index), get_row, get_row_text, HWSelect.guess_index)
 
 
@@ -849,49 +836,26 @@ async def probe(HWSelect: QtCore.QObject):
     """
     # Row Number and Text
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    scan_results_tables = [
-        HWSelect.tableWidget_scan_results_1,
-        HWSelect.tableWidget_scan_results_2,
-        HWSelect.tableWidget_scan_results_3,
-        HWSelect.tableWidget_scan_results_4,
-        HWSelect.tableWidget_scan_results_5,
-    ]
-    get_row = scan_results_tables[tab_index].currentRow()
+    scan_results_table = getattr(HWSelect, f"tableWidget_scan_results_{tab_index+1}")
+    get_row = scan_results_table.currentRow()
     get_row_text = []
-    for n in range(0, scan_results_tables[tab_index].columnCount()):
-        get_row_text.append(str(scan_results_tables[tab_index].item(get_row, n).text()))
+    for n in range(0, scan_results_table.columnCount()):
+        get_row_text.append(str(scan_results_table.item(get_row, n).text()))
 
     # Show Label
-    scan_results_labels = [
-        HWSelect.label2_scan_results_probe_1,
-        HWSelect.label2_scan_results_probe_2,
-        HWSelect.label2_scan_results_probe_3,
-        HWSelect.label2_scan_results_probe_4,
-        HWSelect.label2_scan_results_probe_5,
-    ]
-    scan_results_labels[tab_index].setVisible(True)
+    scan_results_label =  getattr(HWSelect, f"label2_scan_results_probe_{tab_index+1}")
+    scan_results_label.setVisible(True)
 
     # Disable Probe Button
-    probe_buttons = [
-        HWSelect.pushButton_scan_results_probe_1,
-        HWSelect.pushButton_scan_results_probe_2,
-        HWSelect.pushButton_scan_results_probe_3,
-        HWSelect.pushButton_scan_results_probe_4,
-        HWSelect.pushButton_scan_results_probe_5
-    ]
+    probe_button = getattr(HWSelect, f"pushButton_scan_results_probe_{tab_index+1}")
 
     # Send Message for HIPRFISR to Sensor Node Connections
-    local_remote_stacked_widgets = [
-        HWSelect.stackedWidget_local_remote_1,
-        HWSelect.stackedWidget_local_remote_2,
-        HWSelect.stackedWidget_local_remote_3,
-        HWSelect.stackedWidget_local_remote_4,
-        HWSelect.stackedWidget_local_remote_5
-    ]
-    if local_remote_stacked_widgets[tab_index].currentIndex() == 2:
-        probe_buttons[tab_index].setEnabled(False)
+    local_remote_stacked_widget = getattr(HWSelect, f"stackedWidget_local_remote_{tab_index+1}")
+
+    if local_remote_stacked_widget.currentIndex() == 2:
+        probe_button.setEnabled(False)
         await HWSelect.dashboard.backend.probeHardware(str(tab_index), get_row_text)
-    elif local_remote_stacked_widgets[tab_index].currentIndex() == 4:
+    elif local_remote_stacked_widget.currentIndex() == 4:
         await HWSelect.dashboard.backend.probeHardwareLT(str(tab_index), get_row_text)
 
 
@@ -902,30 +866,17 @@ async def scan(HWSelect: QtCore.QObject):
     """
     # Save Checked Items in Current Tab
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    list_widgets = [
-        HWSelect.listWidget_scan_1,
-        HWSelect.listWidget_scan_2,
-        HWSelect.listWidget_scan_3,
-        HWSelect.listWidget_scan_4,
-        HWSelect.listWidget_scan_5,
-    ]
-    get_list_widget = list_widgets[tab_index]
+    list_widget = getattr(HWSelect, f"listWidget_scan_{tab_index+1}")
     hardware_list = []
-    for n in range(0, get_list_widget.count()):
-        if get_list_widget.item(n).checkState() == QtCore.Qt.Checked:
-            hardware_list.append(str(get_list_widget.item(n).text()))
+    for n in range(0, list_widget.count()):
+        if list_widget.item(n).checkState() == QtCore.Qt.Checked:
+            hardware_list.append(str(list_widget.item(n).text()))
 
     # Send Message for HIPRFISR to Sensor Node Connections
-    local_remote_stacked_widgets = [
-        HWSelect.stackedWidget_local_remote_1,
-        HWSelect.stackedWidget_local_remote_2,
-        HWSelect.stackedWidget_local_remote_3,
-        HWSelect.stackedWidget_local_remote_4,
-        HWSelect.stackedWidget_local_remote_5
-    ]
-    if local_remote_stacked_widgets[tab_index].currentIndex() == 2:
+    local_remote_stacked_widget = getattr(HWSelect, f"stackedWidget_local_remote_{tab_index+1}")
+    if local_remote_stacked_widget.currentIndex() == 2:
         await HWSelect.dashboard.backend.scanHardware(str(tab_index), hardware_list)
-    elif local_remote_stacked_widgets[tab_index].currentIndex() == 4:
+    elif local_remote_stacked_widget.currentIndex() == 4:
         await HWSelect.dashboard.backend.scanHardwareLT(str(tab_index), hardware_list)
 
 
@@ -936,42 +887,24 @@ def tsi(HWSelect: QtCore.QObject, add_to_all=False):
     """
     # Copy Scan Result to TSI Table
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    scan_results_widgets = [
-        HWSelect.tableWidget_scan_results_1,
-        HWSelect.tableWidget_scan_results_2,
-        HWSelect.tableWidget_scan_results_3,
-        HWSelect.tableWidget_scan_results_4,
-        HWSelect.tableWidget_scan_results_5,
-    ]
-    hardware_tsi_widgets = [
-        HWSelect.tableWidget_tsi_1,
-        HWSelect.tableWidget_tsi_2,
-        HWSelect.tableWidget_tsi_3,
-        HWSelect.tableWidget_tsi_4,
-        HWSelect.tableWidget_tsi_5,
-    ]
-    hardware_tabs_widgets = [
-        HWSelect.tabWidget_hardware_1,
-        HWSelect.tabWidget_hardware_2,
-        HWSelect.tabWidget_hardware_3,
-        HWSelect.tabWidget_hardware_4,
-        HWSelect.tabWidget_hardware_5,
-    ]
-    get_row = scan_results_widgets[tab_index].currentRow()
-    hardware_id_present = HWSelect.hardwareID_Present(scan_results_widgets[tab_index], get_row)
+    scan_results_widget = getattr(HWSelect, f"tableWidget_scan_results_{tab_index+1}")
+    hardware_tsi_widget = getattr(HWSelect, f"tableWidget_tsi_{tab_index+1}")
+    hardware_tabs_widget = getattr(HWSelect, f"tabWidget_hardware_{tab_index+1}")
+    get_row = scan_results_widget.currentRow()
+    hardware_id_present = HWSelect.hardwareID_Present(scan_results_widget, get_row)
 
     if hardware_id_present:
-        hardware_tsi_widgets[tab_index].setRowCount(hardware_tsi_widgets[tab_index].rowCount() + 1)
-        for col in range(0, scan_results_widgets[tab_index].columnCount()):
-            if scan_results_widgets[tab_index].item(get_row, col) is not None:
-                table_item = QtWidgets.QTableWidgetItem(str(scan_results_widgets[tab_index].item(get_row, col).text()))
+        hardware_tsi_widget.setRowCount(hardware_tsi_widget.rowCount() + 1)
+        for col in range(0, scan_results_widget.columnCount()):
+            if scan_results_widget.item(get_row, col) is not None:
+                table_item = QtWidgets.QTableWidgetItem(str(scan_results_widget.item(get_row, col).text()))
                 table_item.setTextAlignment(QtCore.Qt.AlignCenter)
-                hardware_tsi_widgets[tab_index].setItem(hardware_tsi_widgets[tab_index].rowCount() - 1, col, table_item)
-        hardware_tsi_widgets[tab_index].resizeColumnsToContents()
-        hardware_tsi_widgets[tab_index].resizeRowsToContents()
-        hardware_tsi_widgets[tab_index].horizontalHeader().setStretchLastSection(False)
-        hardware_tsi_widgets[tab_index].horizontalHeader().setStretchLastSection(True)
-        hardware_tabs_widgets[tab_index].setCurrentIndex(0)
+                hardware_tsi_widget.setItem(hardware_tsi_widget.rowCount() - 1, col, table_item)
+        hardware_tsi_widget.resizeColumnsToContents()
+        hardware_tsi_widget.resizeRowsToContents()
+        hardware_tsi_widget.horizontalHeader().setStretchLastSection(False)
+        hardware_tsi_widget.horizontalHeader().setStretchLastSection(True)
+        hardware_tabs_widget.setCurrentIndex(0)
     else:
         # Provide Warning
         if add_to_all == False:
@@ -985,42 +918,24 @@ def pd(HWSelect: QtCore.QObject, add_to_all=False):
     """
     # Copy Scan Result to PD Table
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    scan_results_widgets = [
-        HWSelect.tableWidget_scan_results_1,
-        HWSelect.tableWidget_scan_results_2,
-        HWSelect.tableWidget_scan_results_3,
-        HWSelect.tableWidget_scan_results_4,
-        HWSelect.tableWidget_scan_results_5,
-    ]
-    hardware_pd_widgets = [
-        HWSelect.tableWidget_pd_1,
-        HWSelect.tableWidget_pd_2,
-        HWSelect.tableWidget_pd_3,
-        HWSelect.tableWidget_pd_4,
-        HWSelect.tableWidget_pd_5,
-    ]
-    hardware_tabs_widgets = [
-        HWSelect.tabWidget_hardware_1,
-        HWSelect.tabWidget_hardware_2,
-        HWSelect.tabWidget_hardware_3,
-        HWSelect.tabWidget_hardware_4,
-        HWSelect.tabWidget_hardware_5,
-    ]
-    get_row = scan_results_widgets[tab_index].currentRow()
-    hardware_id_present = HWSelect.hardwareID_Present(scan_results_widgets[tab_index], get_row)
+    scan_results_widget = getattr(HWSelect, f"tableWidget_scan_results_{tab_index+1}")
+    hardware_pd_widget = getattr(HWSelect, f"tableWidget_pd_{tab_index+1}")
+    hardware_tabs_widget = getattr(HWSelect, f"tabWidget_hardware_{tab_index+1}")
+    get_row = scan_results_widget.currentRow()
+    hardware_id_present = HWSelect.hardwareID_Present(scan_results_widget, get_row)
 
     if hardware_id_present:
-        hardware_pd_widgets[tab_index].setRowCount(hardware_pd_widgets[tab_index].rowCount() + 1)
-        for col in range(0, scan_results_widgets[tab_index].columnCount()):
-            if scan_results_widgets[tab_index].item(get_row, col) is not None:
-                table_item = QtWidgets.QTableWidgetItem(str(scan_results_widgets[tab_index].item(get_row, col).text()))
+        hardware_pd_widget.setRowCount(hardware_pd_widget.rowCount() + 1)
+        for col in range(0, scan_results_widget.columnCount()):
+            if scan_results_widget.item(get_row, col) is not None:
+                table_item = QtWidgets.QTableWidgetItem(str(scan_results_widget.item(get_row, col).text()))
                 table_item.setTextAlignment(QtCore.Qt.AlignCenter)
-                hardware_pd_widgets[tab_index].setItem(hardware_pd_widgets[tab_index].rowCount() - 1, col, table_item)
-        hardware_pd_widgets[tab_index].resizeColumnsToContents()
-        hardware_pd_widgets[tab_index].resizeRowsToContents()
-        hardware_pd_widgets[tab_index].horizontalHeader().setStretchLastSection(False)
-        hardware_pd_widgets[tab_index].horizontalHeader().setStretchLastSection(True)
-        hardware_tabs_widgets[tab_index].setCurrentIndex(1)
+                hardware_pd_widget.setItem(hardware_pd_widget.rowCount() - 1, col, table_item)
+        hardware_pd_widget.resizeColumnsToContents()
+        hardware_pd_widget.resizeRowsToContents()
+        hardware_pd_widget.horizontalHeader().setStretchLastSection(False)
+        hardware_pd_widget.horizontalHeader().setStretchLastSection(True)
+        hardware_tabs_widget.setCurrentIndex(1)
     else:
         # Provide Warning
         if add_to_all == False:
@@ -1034,44 +949,26 @@ def attack(HWSelect: QtCore.QObject, add_to_all=False):
     """
     # Copy Scan Result to Attack Table
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    scan_results_widgets = [
-        HWSelect.tableWidget_scan_results_1,
-        HWSelect.tableWidget_scan_results_2,
-        HWSelect.tableWidget_scan_results_3,
-        HWSelect.tableWidget_scan_results_4,
-        HWSelect.tableWidget_scan_results_5,
-    ]
-    hardware_attack_widgets = [
-        HWSelect.tableWidget_attack_1,
-        HWSelect.tableWidget_attack_2,
-        HWSelect.tableWidget_attack_3,
-        HWSelect.tableWidget_attack_4,
-        HWSelect.tableWidget_attack_5,
-    ]
-    hardware_tabs_widgets = [
-        HWSelect.tabWidget_hardware_1,
-        HWSelect.tabWidget_hardware_2,
-        HWSelect.tabWidget_hardware_3,
-        HWSelect.tabWidget_hardware_4,
-        HWSelect.tabWidget_hardware_5,
-    ]
-    get_row = scan_results_widgets[tab_index].currentRow()
-    hardware_id_present = HWSelect.hardwareID_Present(scan_results_widgets[tab_index], get_row)
+    scan_results_widget = getattr(HWSelect, f"tableWidget_scan_results_{tab_index+1}")
+    hardware_attack_widget = getattr(HWSelect, f"tableWidget_attack_{tab_index+1}")
+    hardware_tabs_widget = getattr(HWSelect, f"tabWidget_hardware_{tab_index+1}")
+    get_row = scan_results_widget.currentRow()
+    hardware_id_present = HWSelect.hardwareID_Present(scan_results_widget, get_row)
 
     if hardware_id_present:
-        hardware_attack_widgets[tab_index].setRowCount(hardware_attack_widgets[tab_index].rowCount() + 1)
-        for col in range(0, scan_results_widgets[tab_index].columnCount()):
-            if scan_results_widgets[tab_index].item(get_row, col) is not None:
-                table_item = QtWidgets.QTableWidgetItem(str(scan_results_widgets[tab_index].item(get_row, col).text()))
+        hardware_attack_widget.setRowCount(hardware_attack_widget.rowCount() + 1)
+        for col in range(0, scan_results_widget.columnCount()):
+            if scan_results_widget.item(get_row, col) is not None:
+                table_item = QtWidgets.QTableWidgetItem(str(scan_results_widget.item(get_row, col).text()))
                 table_item.setTextAlignment(QtCore.Qt.AlignCenter)
-                hardware_attack_widgets[tab_index].setItem(
-                    hardware_attack_widgets[tab_index].rowCount() - 1, col, table_item
+                hardware_attack_widget.setItem(
+                    hardware_attack_widget.rowCount() - 1, col, table_item
                 )
-        hardware_attack_widgets[tab_index].resizeColumnsToContents()
-        hardware_attack_widgets[tab_index].resizeRowsToContents()
-        hardware_attack_widgets[tab_index].horizontalHeader().setStretchLastSection(False)
-        hardware_attack_widgets[tab_index].horizontalHeader().setStretchLastSection(True)
-        hardware_tabs_widgets[tab_index].setCurrentIndex(2)
+        hardware_attack_widget.resizeColumnsToContents()
+        hardware_attack_widget.resizeRowsToContents()
+        hardware_attack_widget.horizontalHeader().setStretchLastSection(False)
+        hardware_attack_widget.horizontalHeader().setStretchLastSection(True)
+        hardware_tabs_widget.setCurrentIndex(2)
     else:
         # Provide Warning
         if add_to_all == False:
@@ -1085,42 +982,24 @@ def iq(HWSelect: QtCore.QObject, add_to_all=False):
     """
     # Copy Scan Result to IQ Table
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    scan_results_widgets = [
-        HWSelect.tableWidget_scan_results_1,
-        HWSelect.tableWidget_scan_results_2,
-        HWSelect.tableWidget_scan_results_3,
-        HWSelect.tableWidget_scan_results_4,
-        HWSelect.tableWidget_scan_results_5,
-    ]
-    hardware_iq_widgets = [
-        HWSelect.tableWidget_iq_1,
-        HWSelect.tableWidget_iq_2,
-        HWSelect.tableWidget_iq_3,
-        HWSelect.tableWidget_iq_4,
-        HWSelect.tableWidget_iq_5,
-    ]
-    hardware_tabs_widgets = [
-        HWSelect.tabWidget_hardware_1,
-        HWSelect.tabWidget_hardware_2,
-        HWSelect.tabWidget_hardware_3,
-        HWSelect.tabWidget_hardware_4,
-        HWSelect.tabWidget_hardware_5,
-    ]
-    get_row = scan_results_widgets[tab_index].currentRow()
-    hardware_id_present = HWSelect.hardwareID_Present(scan_results_widgets[tab_index], get_row)
+    scan_results_widget = getattr(HWSelect, f"tableWidget_scan_results_{tab_index+1}")
+    hardware_iq_widget = getattr(HWSelect, f"tableWidget_iq_{tab_index+1}")
+    hardware_tabs_widget = getattr(HWSelect, f"tabWidget_hardware_{tab_index+1}")
+    get_row = scan_results_widget.currentRow()
+    hardware_id_present = HWSelect.hardwareID_Present(scan_results_widget, get_row)
 
     if hardware_id_present:
-        hardware_iq_widgets[tab_index].setRowCount(hardware_iq_widgets[tab_index].rowCount() + 1)
-        for col in range(0, scan_results_widgets[tab_index].columnCount()):
-            if scan_results_widgets[tab_index].item(get_row, col) is not None:
-                table_item = QtWidgets.QTableWidgetItem(str(scan_results_widgets[tab_index].item(get_row, col).text()))
+        hardware_iq_widget.setRowCount(hardware_iq_widget.rowCount() + 1)
+        for col in range(0, scan_results_widget.columnCount()):
+            if scan_results_widget.item(get_row, col) is not None:
+                table_item = QtWidgets.QTableWidgetItem(str(scan_results_widget.item(get_row, col).text()))
                 table_item.setTextAlignment(QtCore.Qt.AlignCenter)
-                hardware_iq_widgets[tab_index].setItem(hardware_iq_widgets[tab_index].rowCount() - 1, col, table_item)
-        hardware_iq_widgets[tab_index].resizeColumnsToContents()
-        hardware_iq_widgets[tab_index].resizeRowsToContents()
-        hardware_iq_widgets[tab_index].horizontalHeader().setStretchLastSection(False)
-        hardware_iq_widgets[tab_index].horizontalHeader().setStretchLastSection(True)
-        hardware_tabs_widgets[tab_index].setCurrentIndex(3)
+                hardware_iq_widget.setItem(hardware_iq_widget.rowCount() - 1, col, table_item)
+        hardware_iq_widget.resizeColumnsToContents()
+        hardware_iq_widget.resizeRowsToContents()
+        hardware_iq_widget.horizontalHeader().setStretchLastSection(False)
+        hardware_iq_widget.horizontalHeader().setStretchLastSection(True)
+        hardware_tabs_widget.setCurrentIndex(3)
     else:
         # Provide Warning
         if add_to_all == False:
@@ -1134,44 +1013,26 @@ def archive(HWSelect: QtCore.QObject, add_to_all=False):
     """
     # Copy Scan Result to Archive Table
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    scan_results_widgets = [
-        HWSelect.tableWidget_scan_results_1,
-        HWSelect.tableWidget_scan_results_2,
-        HWSelect.tableWidget_scan_results_3,
-        HWSelect.tableWidget_scan_results_4,
-        HWSelect.tableWidget_scan_results_5,
-    ]
-    hardware_archive_widgets = [
-        HWSelect.tableWidget_archive_1,
-        HWSelect.tableWidget_archive_2,
-        HWSelect.tableWidget_archive_3,
-        HWSelect.tableWidget_archive_4,
-        HWSelect.tableWidget_archive_5,
-    ]
-    hardware_tabs_widgets = [
-        HWSelect.tabWidget_hardware_1,
-        HWSelect.tabWidget_hardware_2,
-        HWSelect.tabWidget_hardware_3,
-        HWSelect.tabWidget_hardware_4,
-        HWSelect.tabWidget_hardware_5,
-    ]
-    get_row = scan_results_widgets[tab_index].currentRow()
-    hardware_id_present = HWSelect.hardwareID_Present(scan_results_widgets[tab_index], get_row)
+    scan_results_widget = getattr(HWSelect, f"tableWidget_scan_results_{tab_index+1}")
+    hardware_archive_widget = getattr(HWSelect, f"tableWidget_archive_{tab_index+1}")
+    hardware_tabs_widget = getattr(HWSelect, f"tabWidget_hardware_{tab_index+1}")
+    get_row = scan_results_widget.currentRow()
+    hardware_id_present = HWSelect.hardwareID_Present(scan_results_widget, get_row)
 
     if hardware_id_present:
-        hardware_archive_widgets[tab_index].setRowCount(hardware_archive_widgets[tab_index].rowCount() + 1)
-        for col in range(0, scan_results_widgets[tab_index].columnCount()):
-            if scan_results_widgets[tab_index].item(get_row, col) is not None:
-                table_item = QtWidgets.QTableWidgetItem(str(scan_results_widgets[tab_index].item(get_row, col).text()))
+        hardware_archive_widget.setRowCount(hardware_archive_widget.rowCount() + 1)
+        for col in range(0, scan_results_widget.columnCount()):
+            if scan_results_widget.item(get_row, col) is not None:
+                table_item = QtWidgets.QTableWidgetItem(str(scan_results_widget.item(get_row, col).text()))
                 table_item.setTextAlignment(QtCore.Qt.AlignCenter)
-                hardware_archive_widgets[tab_index].setItem(
-                    hardware_archive_widgets[tab_index].rowCount() - 1, col, table_item
+                hardware_archive_widget.setItem(
+                    hardware_archive_widget.rowCount() - 1, col, table_item
                 )
-        hardware_archive_widgets[tab_index].resizeColumnsToContents()
-        hardware_archive_widgets[tab_index].resizeRowsToContents()
-        hardware_archive_widgets[tab_index].horizontalHeader().setStretchLastSection(False)
-        hardware_archive_widgets[tab_index].horizontalHeader().setStretchLastSection(True)
-        hardware_tabs_widgets[tab_index].setCurrentIndex(4)
+        hardware_archive_widget.resizeColumnsToContents()
+        hardware_archive_widget.resizeRowsToContents()
+        hardware_archive_widget.horizontalHeader().setStretchLastSection(False)
+        hardware_archive_widget.horizontalHeader().setStretchLastSection(True)
+        hardware_tabs_widget.setCurrentIndex(4)
     else:
         # Provide Warning
         if add_to_all == False:
@@ -1185,19 +1046,13 @@ def remove_tsi(HWSelect: QtCore.QObject):
     """
     # Remove Row
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    tsi_tables = [
-        HWSelect.tableWidget_tsi_1,
-        HWSelect.tableWidget_tsi_2,
-        HWSelect.tableWidget_tsi_3,
-        HWSelect.tableWidget_tsi_4,
-        HWSelect.tableWidget_tsi_5,
-    ]
-    get_row = tsi_tables[tab_index].currentRow()
-    tsi_tables[tab_index].removeRow(get_row)
-    if get_row == tsi_tables[tab_index].rowCount():
-        tsi_tables[tab_index].setCurrentCell(tsi_tables[tab_index].rowCount() - 1, 0)
+    tsi_table = getattr(HWSelect, f"tableWidget_tsi_{tab_index+1}")
+    get_row = tsi_table.currentRow()
+    tsi_table.removeRow(get_row)
+    if get_row == tsi_table.rowCount():
+        tsi_table.setCurrentCell(tsi_table.rowCount() - 1, 0)
     elif get_row >= 0:
-        tsi_tables[tab_index].setCurrentCell(get_row, 0)
+        tsi_table.setCurrentCell(get_row, 0)
 
 
 @QtCore.pyqtSlot(QtCore.QObject)
@@ -1207,19 +1062,13 @@ def remove_pd(HWSelect: QtCore.QObject):
     """
     # Remove Row
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    pd_tables = [
-        HWSelect.tableWidget_pd_1,
-        HWSelect.tableWidget_pd_2,
-        HWSelect.tableWidget_pd_3,
-        HWSelect.tableWidget_pd_4,
-        HWSelect.tableWidget_pd_5,
-    ]
-    get_row = pd_tables[tab_index].currentRow()
-    pd_tables[tab_index].removeRow(get_row)
-    if get_row == pd_tables[tab_index].rowCount():
-        pd_tables[tab_index].setCurrentCell(pd_tables[tab_index].rowCount() - 1, 0)
+    pd_table = getattr(HWSelect, f"tableWidget_pd_{tab_index+1}")
+    get_row = pd_table.currentRow()
+    pd_table.removeRow(get_row)
+    if get_row == pd_table.rowCount():
+        pd_table.setCurrentCell(pd_table.rowCount() - 1, 0)
     elif get_row >= 0:
-        pd_tables[tab_index].setCurrentCell(get_row, 0)
+        pd_table.setCurrentCell(get_row, 0)
 
 
 @QtCore.pyqtSlot(QtCore.QObject)
@@ -1229,19 +1078,13 @@ def remove_attack(HWSelect: QtCore.QObject):
     """
     # Remove Row
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    attack_tables = [
-        HWSelect.tableWidget_attack_1,
-        HWSelect.tableWidget_attack_2,
-        HWSelect.tableWidget_attack_3,
-        HWSelect.tableWidget_attack_4,
-        HWSelect.tableWidget_attack_5,
-    ]
-    get_row = attack_tables[tab_index].currentRow()
-    attack_tables[tab_index].removeRow(get_row)
-    if get_row == attack_tables[tab_index].rowCount():
-        attack_tables[tab_index].setCurrentCell(attack_tables[tab_index].rowCount() - 1, 0)
+    attack_table = getattr(HWSelect, f"tableWidget_attack_{tab_index+1}")
+    get_row = attack_table.currentRow()
+    attack_table.removeRow(get_row)
+    if get_row == attack_table.rowCount():
+        attack_table.setCurrentCell(attack_table.rowCount() - 1, 0)
     elif get_row >= 0:
-        attack_tables[tab_index].setCurrentCell(get_row, 0)
+        attack_table.setCurrentCell(get_row, 0)
 
 
 @QtCore.pyqtSlot(QtCore.QObject)
@@ -1251,19 +1094,13 @@ def remove_iq(HWSelect: QtCore.QObject):
     """
     # Remove Row
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    iq_tables = [
-        HWSelect.tableWidget_iq_1,
-        HWSelect.tableWidget_iq_2,
-        HWSelect.tableWidget_iq_3,
-        HWSelect.tableWidget_iq_4,
-        HWSelect.tableWidget_iq_5,
-    ]
-    get_row = iq_tables[tab_index].currentRow()
-    iq_tables[tab_index].removeRow(get_row)
-    if get_row == iq_tables[tab_index].rowCount():
-        iq_tables[tab_index].setCurrentCell(iq_tables[tab_index].rowCount() - 1, 0)
+    iq_table = getattr(HWSelect, f"tableWidget_iq_{tab_index+1}")
+    get_row = iq_table.currentRow()
+    iq_table.removeRow(get_row)
+    if get_row == iq_table.rowCount():
+        iq_table.setCurrentCell(iq_table.rowCount() - 1, 0)
     elif get_row >= 0:
-        iq_tables[tab_index].setCurrentCell(get_row, 0)
+        iq_table.setCurrentCell(get_row, 0)
 
 
 @QtCore.pyqtSlot(QtCore.QObject)
@@ -1273,19 +1110,13 @@ def remove_archive(HWSelect: QtCore.QObject):
     """
     # Remove Row
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    archive_tables = [
-        HWSelect.tableWidget_archive_1,
-        HWSelect.tableWidget_archive_2,
-        HWSelect.tableWidget_archive_3,
-        HWSelect.tableWidget_archive_4,
-        HWSelect.tableWidget_archive_5,
-    ]
-    get_row = archive_tables[tab_index].currentRow()
-    archive_tables[tab_index].removeRow(get_row)
-    if get_row == archive_tables[tab_index].rowCount():
-        archive_tables[tab_index].setCurrentCell(archive_tables[tab_index].rowCount() - 1, 0)
+    archive_table = getattr(HWSelect, f"tableWidget_archive_{tab_index+1}")
+    get_row = archive_table.currentRow()
+    archive_table.removeRow(get_row)
+    if get_row == archive_table.rowCount():
+        archive_table.setCurrentCell(archive_table.rowCount() - 1, 0)
     elif get_row >= 0:
-        archive_tables[tab_index].setCurrentCell(get_row, 0)
+        archive_table.setCurrentCell(get_row, 0)
 
 
 @QtCore.pyqtSlot(QtCore.QObject)
@@ -1496,92 +1327,17 @@ def local(HWSelect: QtCore.QObject, tab_index=0):
     """
     Switch to the Local Sensor Node configuration page dynamically.
     """
-    index = tab_index + 1  # Since UI elements are indexed from 1
-
-    # List of widgets to disable
-    disable_widgets = [
-        "textEdit_ip_addr", "textEdit_msg_port", "textEdit_hb_port",
-        "pushButton_ping", "pushButton_connect",
-        "label2_ip_addr", "label2_msg_port", "label2_hb_port",
-        "checkBox_recall_settings_remote", "label2_nickname", "textEdit_nickname",
-    ]
-
-    # List of widgets to hide
-    hide_widgets = [
-        "label2_network_type", "comboBox_network_type"
-    ]
-
-    # Disable all relevant widgets dynamically
-    for widget in disable_widgets:
-        element = getattr(HWSelect, f"{widget}_{index}", None)
-        if element:
-            element.setEnabled(False)
-    tab_widget_element = getattr(HWSelect, f"tabWidget_on_connect_{index}", None)
-    if tab_widget_element:
-        tab_widget_element.setTabEnabled(2,False)
-
-    # Hide only the required widgets
-    for widget in hide_widgets:
-        element = getattr(HWSelect, f"{widget}_{index}", None)
-        if element:
-            element.setVisible(False)
-
-    # Set nickname text field to "Local Sensor Node"
-    text_nickname = getattr(HWSelect, f"textEdit_nickname_{index}", None)
-    if text_nickname:
-        text_nickname.setPlainText("Local Sensor Node")
-
-    # Handle Stacked Widget Switching
-    stacked_widget = getattr(HWSelect, f"stackedWidget_local_remote_{index}", None)
-    if (stacked_widget and stacked_widget.currentIndex() == 1) or (stacked_widget and stacked_widget.currentIndex() == 3):
-        stacked_widget.setCurrentIndex(0)
-    
+    # Radio button will only be enabled when disconnected
+    HWSelect.sensorNodeDisconnected(tab_index)
+        
 
 @QtCore.pyqtSlot(QtCore.QObject)
 def remote(HWSelect: QtCore.QObject, tab_index=0):
     """
     Switch to the Remote Sensor Node configuration page dynamically.
     """
-    index = tab_index + 1  # Since UI elements are indexed from 1
-
-    # List of widgets to enable
-    enable_widgets = [
-        "textEdit_ip_addr", "textEdit_msg_port", "textEdit_hb_port",
-        "pushButton_ping", "pushButton_connect",
-        "label2_ip_addr", "label2_msg_port", "label2_hb_port",
-        "checkBox_recall_settings_remote", "label2_nickname", "textEdit_nickname",
-        "label2_location", "textEdit_location", "label2_notes", "textEdit_notes"
-    ]
-
-    # List of widgets to set as visible (only these two)
-    visible_widgets = [
-        "label2_network_type", "comboBox_network_type"
-    ]
-
-    # Enable all relevant widgets dynamically
-    for widget in enable_widgets:
-        element = getattr(HWSelect, f"{widget}_{index}", None)
-        if element:
-            element.setEnabled(True)
-    tab_widget_element = getattr(HWSelect, f"tabWidget_on_connect_{index}", None)
-    if tab_widget_element:
-        tab_widget_element.setTabEnabled(2,True)
-
-    # Set only the required widgets to visible
-    for widget in visible_widgets:
-        element = getattr(HWSelect, f"{widget}_{index}", None)
-        if element:
-            element.setVisible(True)
-
-    # Clear nickname text field
-    text_nickname = getattr(HWSelect, f"textEdit_nickname_{index}", None)
-    if text_nickname:
-        text_nickname.setPlainText("")
-
-    # Handle Stacked Widget Switching
-    stacked_widget = getattr(HWSelect, f"stackedWidget_local_remote_{index}", None)
-    if stacked_widget and stacked_widget.currentIndex() == 0:
-        stacked_widget.setCurrentIndex(1)
+    # Radio button will only be enabled when disconnected
+    HWSelect.sensorNodeDisconnected(tab_index)
 
 
 @qasync.asyncSlot(QtCore.QObject)
@@ -1591,39 +1347,23 @@ async def launch(HWSelect: QtCore.QObject):
     """
     # Get Widgets and Values
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    recall_settings_widgets = [
-        HWSelect.checkBox_recall_settings_local_1,
-        HWSelect.checkBox_recall_settings_local_2,
-        HWSelect.checkBox_recall_settings_local_3,
-        HWSelect.checkBox_recall_settings_local_4,
-        HWSelect.checkBox_recall_settings_local_5
-    ]
-    launch_widgets = [
-        HWSelect.pushButton_launch_1,
-        HWSelect.pushButton_launch_2,
-        HWSelect.pushButton_launch_3,
-        HWSelect.pushButton_launch_4,
-        HWSelect.pushButton_launch_5
-    ]
-    get_ip = 'ipc'
-    get_msg_port = "ipc:///tmp/zmq_ipc_message"
-    get_hb_port = "ipc:///tmp/zmq_ipc_heartbeat"
-    get_recall_settings = str(recall_settings_widgets[tab_index].isChecked())
+
+    recall_settings_widgets = getattr(HWSelect, f"checkBox_recall_settings_local_{tab_index+1}")
+    launch_widgets = getattr(HWSelect, f"pushButton_launch_{tab_index+1}")
+    local_button = getattr(HWSelect, f"radioButton_local_{tab_index+1}")
+    remote_button = getattr(HWSelect, f"radioButton_remote_{tab_index+1}")
     
     # Disable Buttons
-    launch_widgets[tab_index].setEnabled(False)
-    recall_settings_widgets[tab_index].setEnabled(False)
+    launch_widgets.setEnabled(False)
+    recall_settings_widgets.setEnabled(False)
+    local_button.setEnabled(False)
+    remote_button.setEnabled(False)
     QtWidgets.QApplication.processEvents()
     
     # Connect
     os.system('python3 "' + os.path.join(fissure.utils.SENSOR_NODE_DIR, "SensorNode.py") + '" --local &')
     HWSelect.dashboard.logger.info("Launching local sensor node, please wait...")
-    # await asyncio.sleep(9)
-    # time.sleep(1)
  
-    # Send Message for HIPRFISR to Sensor Node Connections
-    await HWSelect.dashboard.backend.launch_local_sensor_node(str(tab_index), get_ip, get_msg_port, get_hb_port, get_recall_settings)
-
     # Set the New Connection Flag for the Warning on Cancel
     HWSelect.new_local_connection[tab_index] = True
 
@@ -1661,53 +1401,17 @@ async def connect(HWSelect: QtCore.QObject):
     """
     # Connect
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    ip_widgets = [
-        HWSelect.textEdit_ip_addr_1, 
-        HWSelect.textEdit_ip_addr_2, 
-        HWSelect.textEdit_ip_addr_3, 
-        HWSelect.textEdit_ip_addr_4, 
-        HWSelect.textEdit_ip_addr_5
-    ]
-    msg_port_widgets = [
-        HWSelect.textEdit_msg_port_1,
-        HWSelect.textEdit_msg_port_2,
-        HWSelect.textEdit_msg_port_3,
-        HWSelect.textEdit_msg_port_4,
-        HWSelect.textEdit_msg_port_5,
-    ]
-    hb_port_widgets = [
-        HWSelect.textEdit_hb_port_1,
-        HWSelect.textEdit_hb_port_2,
-        HWSelect.textEdit_hb_port_3,
-        HWSelect.textEdit_hb_port_4,
-        HWSelect.textEdit_hb_port_5,
-    ]
-    recall_settings_widgets = [
-        HWSelect.checkBox_recall_settings_remote_1,
-        HWSelect.checkBox_recall_settings_remote_2,
-        HWSelect.checkBox_recall_settings_remote_3,
-        HWSelect.checkBox_recall_settings_remote_4,
-        HWSelect.checkBox_recall_settings_remote_5,
-    ]
-    connect_widgets = [
-        HWSelect.pushButton_connect_1,
-        HWSelect.pushButton_connect_2,
-        HWSelect.pushButton_connect_3,
-        HWSelect.pushButton_connect_4,
-        HWSelect.pushButton_connect_5,
-    ]
-    network_type_widgets = [
-        HWSelect.comboBox_network_type_1,
-        HWSelect.comboBox_network_type_2,
-        HWSelect.comboBox_network_type_3,
-        HWSelect.comboBox_network_type_4,
-        HWSelect.comboBox_network_type_5,
-    ]
+    ip_widget = getattr(HWSelect, f"textEdit_ip_addr_{tab_index+1}")
+    msg_port_widget = getattr(HWSelect, f"textEdit_msg_port_{tab_index+1}")
+    hb_port_widget = getattr(HWSelect, f"textEdit_hb_port_{tab_index+1}")
+    recall_settings_widget = getattr(HWSelect, f"checkBox_recall_settings_remote_{tab_index+1}")
+    connect_widget = getattr(HWSelect, f"pushButton_connect_{tab_index+1}")
+    network_type_widget = getattr(HWSelect, f"comboBox_network_type_{tab_index+1}")
 
-    get_ip = str(ip_widgets[tab_index].toPlainText())
-    get_msg_port = str(msg_port_widgets[tab_index].toPlainText())
-    get_hb_port = str(hb_port_widgets[tab_index].toPlainText())
-    get_recall_settings = str(recall_settings_widgets[tab_index].isChecked())
+    get_ip = str(ip_widget.toPlainText())
+    get_msg_port = str(msg_port_widget.toPlainText())
+    get_hb_port = str(hb_port_widget.toPlainText())
+    get_recall_settings = str(recall_settings_widget.isChecked())
 
     # Check Existing IPs
     get_sensor_node = ["sensor_node1", "sensor_node2", "sensor_node3", "sensor_node4", "sensor_node5"]
@@ -1717,12 +1421,12 @@ async def connect(HWSelect: QtCore.QObject):
             return
 
     # Disable Buttons
-    connect_widgets[tab_index].setEnabled(False)
-    recall_settings_widgets[tab_index].setEnabled(False)
-    ip_widgets[tab_index].setEnabled(False)
-    msg_port_widgets[tab_index].setEnabled(False)
-    hb_port_widgets[tab_index].setEnabled(False)
-    network_type_widgets[tab_index].setEnabled(False)
+    connect_widget.setEnabled(False)
+    recall_settings_widget.setEnabled(False)
+    ip_widget.setEnabled(False)
+    msg_port_widget.setEnabled(False)
+    hb_port_widget.setEnabled(False)
+    network_type_widget.setEnabled(False)
     QtWidgets.QApplication.processEvents()
 
     # Send Message for HIPRFISR to Sensor Node Connections
@@ -1738,77 +1442,29 @@ async def disconnect(HWSelect: QtCore.QObject, delete_node=False):
     """
     # Disconnect
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    stacked_widgets = [
-        HWSelect.stackedWidget_local_remote_1,
-        HWSelect.stackedWidget_local_remote_2,
-        HWSelect.stackedWidget_local_remote_3,
-        HWSelect.stackedWidget_local_remote_4,
-        HWSelect.stackedWidget_local_remote_5,
-    ]
-    local_buttons = [
-        HWSelect.radioButton_local_1,
-        HWSelect.radioButton_local_2,
-        HWSelect.radioButton_local_3,
-        HWSelect.radioButton_local_4,
-        HWSelect.radioButton_local_5,
-    ]
-    network_type_widgets = [
-        HWSelect.comboBox_network_type_1,
-        HWSelect.comboBox_network_type_2,
-        HWSelect.comboBox_network_type_3,
-        HWSelect.comboBox_network_type_4,
-        HWSelect.comboBox_network_type_5,
-    ]
 
-    # Local
-    if local_buttons[tab_index].isChecked():
-        stacked_widgets[tab_index].setCurrentIndex(0)
-        await HWSelect.dashboard.backend.disconnect_local_sensor_node(str(tab_index))
+    stacked_widgets = getattr(HWSelect, f"stackedWidget_local_remote_{tab_index+1}")
+    network_type_widgets = getattr(HWSelect, f"comboBox_network_type_{tab_index+1}")
+    local_button = getattr(HWSelect, f"radioButton_local_{tab_index+1}")
+    remote_button = getattr(HWSelect, f"radioButton_remote_{tab_index+1}")
 
-        # Set the New Connection Flag for the Warning on Cancel
-        HWSelect.new_local_connection[tab_index] = False
+    if (str(network_type_widgets.currentText()) == "IP") or local_button.isChecked():
 
-    # Remote
-    else:
-        if str(network_type_widgets[tab_index].currentText()) == "IP":
-            ip_widgets = [
-                HWSelect.textEdit_ip_addr_1,
-                HWSelect.textEdit_ip_addr_2,
-                HWSelect.textEdit_ip_addr_3,
-                HWSelect.textEdit_ip_addr_4,
-                HWSelect.textEdit_ip_addr_5
-            ]
-            msg_port_widgets = [
-                HWSelect.textEdit_msg_port_1,
-                HWSelect.textEdit_msg_port_2,
-                HWSelect.textEdit_msg_port_3,
-                HWSelect.textEdit_msg_port_4,
-                HWSelect.textEdit_msg_port_5,
-            ]
-            hb_port_widgets = [
-                HWSelect.textEdit_hb_port_1,
-                HWSelect.textEdit_hb_port_2,
-                HWSelect.textEdit_hb_port_3,
-                HWSelect.textEdit_hb_port_4,
-                HWSelect.textEdit_hb_port_5,
-            ]
+        local_button.setEnabled(False)        
+        remote_button.setEnabled(False)        
 
-            get_ip = str(ip_widgets[tab_index].toPlainText())
-            get_msg_port = str(msg_port_widgets[tab_index].toPlainText())
-            get_hb_port = str(hb_port_widgets[tab_index].toPlainText())
+        stacked_widgets.setCurrentIndex(6)
 
-            stacked_widgets[tab_index].setCurrentIndex(1)
+        # Send Message for HIPRFISR to Sensor Node Connections
+        await HWSelect.dashboard.backend.disconnect_remote_sensor_node(str(tab_index), delete_node)
 
-            # Send Message for HIPRFISR to Sensor Node Connections
-            await HWSelect.dashboard.backend.disconnect_remote_sensor_node(str(tab_index), get_ip, get_msg_port, get_hb_port, delete_node)
+    elif str(network_type_widgets.currentText()) == "Meshtastic":
 
-        elif str(network_type_widgets[tab_index].currentText()) == "Meshtastic":
+        stacked_widgets.setCurrentIndex(3)
 
-            stacked_widgets[tab_index].setCurrentIndex(3)
+        # Send Message for HIPRFISR to end Meshtastic Serial Connection
+        await HWSelect.dashboard.backend.disconnectFromMeshtastic(str(tab_index))
 
-            # Send Message for HIPRFISR to end Meshtastic Serial Connection
-            await HWSelect.dashboard.backend.disconnectFromMeshtastic(str(tab_index))
-    
 
 @QtCore.pyqtSlot(QtCore.QObject)
 def remove_all(HWSelect: QtCore.QObject):
@@ -2062,7 +1718,7 @@ def delete(HWSelect: QtCore.QObject):
             HWSelect.stackedWidget_local_remote_5,
         ]
         if stacked_widgets[deleted_node].currentIndex() == 2:
-            disconnect(HWSelect, True)
+            disconnect(HWSelect, True)  # Disconnect
 
         if deleted_node == 0:
             HWSelect.dashboard.backend.settings["sensor_node1"]["local_remote"] = (
@@ -2309,44 +1965,19 @@ async def find(HWSelect: QtCore.QObject):
     """
     # GPS Data Format
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    format_widgets = [
-        HWSelect.comboBox_format_1,
-        HWSelect.comboBox_format_2,
-        HWSelect.comboBox_format_3,
-        HWSelect.comboBox_format_4,
-        HWSelect.comboBox_format_5
-    ]
-    get_format = str(format_widgets[tab_index].currentText())
+    format_widget = getattr(HWSelect, f"comboBox_format_{tab_index+1}")
+    get_format = str(format_widget.currentText())
 
     # Detect if Connected
-    local_remote_stacked_widgets = [
-        HWSelect.stackedWidget_local_remote_1,
-        HWSelect.stackedWidget_local_remote_2,
-        HWSelect.stackedWidget_local_remote_3,
-        HWSelect.stackedWidget_local_remote_4,
-        HWSelect.stackedWidget_local_remote_5
-    ]
+    local_remote_stacked_widget = getattr(HWSelect, f"stackedWidget_local_remote_{tab_index+1}")
 
     # Send the Message
-    gps_source_widgets = [
-        HWSelect.comboBox_gps_source_1,
-        HWSelect.comboBox_gps_source_1,
-        HWSelect.comboBox_gps_source_1,
-        HWSelect.comboBox_gps_source_1,
-        HWSelect.comboBox_gps_source_1
-    ]
-
-    find_widgets = [
-        HWSelect.pushButton_find_1,
-        HWSelect.pushButton_find_2,
-        HWSelect.pushButton_find_3,
-        HWSelect.pushButton_find_4,
-        HWSelect.pushButton_find_5
-    ]
+    gps_source_widget = getattr(HWSelect, f"comboBox_gps_source_{tab_index+1}")
+    find_widget = getattr(HWSelect, f"pushButton_find_{tab_index+1}")
 
     # Local, Connected: IP
-    if local_remote_stacked_widgets[tab_index].currentIndex() == 2:
-        get_gps_source = str(gps_source_widgets[tab_index].currentText())
+    if local_remote_stacked_widget.currentIndex() == 2:
+        get_gps_source = str(gps_source_widget.currentText())
         if get_gps_source == "gpsd":
             await HWSelect.dashboard.backend.findGPS_Coordinates(str(tab_index), get_gps_source, get_format)
         elif get_gps_source == "Meshtastic":
@@ -2359,12 +1990,12 @@ async def find(HWSelect: QtCore.QObject):
             return
 
         # Disable the Find Button
-        find_widgets[tab_index].setEnabled(False)
+        find_widget.setEnabled(False)
 
     # Remote, Connected: Meshtastic
-    elif local_remote_stacked_widgets[tab_index].currentIndex() == 4:
+    elif local_remote_stacked_widget.currentIndex() == 4:
         # Send the Message
-        get_gps_source = str(gps_source_widgets[tab_index].currentText())
+        get_gps_source = str(gps_source_widget.currentText())
         if get_gps_source == "gpsd":
             await HWSelect.dashboard.backend.findGPS_CoordinatesLT(str(tab_index), get_gps_source, get_format)
         elif get_gps_source == "Meshtastic":
@@ -2377,7 +2008,7 @@ async def find(HWSelect: QtCore.QObject):
             return
 
         # Disable the Find Button
-        # find_widgets[tab_index].setEnabled(False)
+        # find_widget.setEnabled(False)
     else:
         HWSelect.dashboard.logger.error("Sensor node not connected. Unable to retrieve GPS location.")
 
@@ -2389,25 +2020,14 @@ def map(HWSelect: QtCore.QObject):
     """
     # Gather Location
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    location_widgets = [
-        HWSelect.textEdit_location_1,
-        HWSelect.textEdit_location_2,
-        HWSelect.textEdit_location_3,
-        HWSelect.textEdit_location_4,
-        HWSelect.textEdit_location_5
-    ]
-    format_widgets = [
-        HWSelect.comboBox_format_1,
-        HWSelect.comboBox_format_2,
-        HWSelect.comboBox_format_3,
-        HWSelect.comboBox_format_4,
-        HWSelect.comboBox_format_5
-    ]
-    get_format = str(format_widgets[tab_index].currentText())
+    location_widget = getattr(HWSelect, f"textEdit_location_{tab_index+1}")
+    format_widget = getattr(HWSelect, f"comboBox_format_{tab_index+1}")
+
+    get_format = str(format_widget.currentText())
 
     # Convert to DD if needed
     try:
-        coord = str(location_widgets[tab_index].toPlainText()).strip()
+        coord = str(location_widget.toPlainText()).strip()
         
         if get_format == "MGRS":
             lat, lon = fissure.utils.mgrs_to_dd(coord)
@@ -2462,15 +2082,18 @@ def network_type_changed(HWSelect: QtCore.QObject):
     # Handle Stacked Widget Switching
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
     stacked_widget = getattr(HWSelect, f"stackedWidget_local_remote_{tab_index + 1}", None)
+    select_connect_stacked_widget = getattr(HWSelect, f"stackedWidget_select_connect_{tab_index + 1}", None)
     network_type_widget = getattr(HWSelect, f"comboBox_network_type_{tab_index + 1}", None)
     local_actions_stacked_widget = getattr(HWSelect, f"stackedWidget_local_actions_{tab_index + 1}", None)
     remote_actions_stacked_widget = getattr(HWSelect, f"stackedWidget_remote_actions_{tab_index + 1}", None)
     
     if str(network_type_widget.currentText()) == "IP":
-        stacked_widget.setCurrentIndex(1)
+        select_connect_stacked_widget.setCurrentIndex(0)
+        stacked_widget.setCurrentIndex(5)
         local_actions_stacked_widget.setCurrentIndex(0)        
         remote_actions_stacked_widget.setCurrentIndex(0)        
     elif str(network_type_widget.currentText()) == "Meshtastic":
+        select_connect_stacked_widget.setCurrentIndex(0)
         stacked_widget.setCurrentIndex(3)
         local_actions_stacked_widget.setCurrentIndex(1)        
         remote_actions_stacked_widget.setCurrentIndex(1)  
@@ -2483,13 +2106,8 @@ def meshtastic_refresh(HWSelect: QtCore.QObject):
     """
     # Move Page to the Right
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    serial_port_widgets = [
-        HWSelect.comboBox_meshtastic_port_1, 
-        HWSelect.comboBox_meshtastic_port_2, 
-        HWSelect.comboBox_meshtastic_port_3, 
-        HWSelect.comboBox_meshtastic_port_4, 
-        HWSelect.comboBox_meshtastic_port_5
-    ]
+    serial_port_widget = getattr(HWSelect, f"comboBox_meshtastic_port_{tab_index+1}")
+
     # ports = [port.device for port in serial.tools.list_ports.comports()]
 
     # Only include /dev/ttyACM* and /dev/ttyUSB*
@@ -2500,8 +2118,8 @@ def meshtastic_refresh(HWSelect: QtCore.QObject):
     ]
     ports.sort(key=lambda s: [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', s)])
 
-    serial_port_widgets[tab_index].clear()
-    serial_port_widgets[tab_index].addItems(ports if ports else ["No ports found"])
+    serial_port_widget.clear()
+    serial_port_widget.addItems(ports if ports else ["No ports found"])
 
 
 @qasync.asyncSlot(QtCore.QObject)
@@ -2527,37 +2145,13 @@ async def meshtastic_connect(HWSelect: QtCore.QObject):
     """
     # Connect
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    serial_port = [
-        HWSelect.comboBox_meshtastic_port_1, 
-        HWSelect.comboBox_meshtastic_port_2, 
-        HWSelect.comboBox_meshtastic_port_3, 
-        HWSelect.comboBox_meshtastic_port_4, 
-        HWSelect.comboBox_meshtastic_port_5
-    ]
-    serial_baud_rate = [
-        HWSelect.comboBox_meshtastic_baud_rate_1,
-        HWSelect.comboBox_meshtastic_baud_rate_2,
-        HWSelect.comboBox_meshtastic_baud_rate_3,
-        HWSelect.comboBox_meshtastic_baud_rate_4,
-        HWSelect.comboBox_meshtastic_baud_rate_5,
-    ]   
-    local_remote_stacked_widgets = [
-        HWSelect.stackedWidget_local_remote_1,
-        HWSelect.stackedWidget_local_remote_2,
-        HWSelect.stackedWidget_local_remote_3,
-        HWSelect.stackedWidget_local_remote_4,
-        HWSelect.stackedWidget_local_remote_5,
-    ]
-    network_type_widgets = [
-        HWSelect.comboBox_network_type_1,
-        HWSelect.comboBox_network_type_2,
-        HWSelect.comboBox_network_type_3,
-        HWSelect.comboBox_network_type_4,
-        HWSelect.comboBox_network_type_5,
-    ]
+    serial_port = getattr(HWSelect, f"comboBox_meshtastic_port_{tab_index+1}")
+    serial_baud_rate = getattr(HWSelect, f"comboBox_meshtastic_baud_rate_{tab_index+1}")
+    local_remote_stacked_widget = getattr(HWSelect, f"stackedWidget_local_remote_{tab_index+1}")
+    network_type_widget = getattr(HWSelect, f"comboBox_network_type_{tab_index+1}")
 
-    get_serial_port = str(serial_port[tab_index].currentText())
-    get_serial_baud_rate = str(serial_baud_rate[tab_index].currentText())
+    get_serial_port = str(serial_port.currentText())
+    get_serial_baud_rate = str(serial_baud_rate.currentText())
 
     # Check Existing IPs
     get_sensor_node = ["sensor_node1", "sensor_node2", "sensor_node3", "sensor_node4", "sensor_node5"]
@@ -2567,8 +2161,8 @@ async def meshtastic_connect(HWSelect: QtCore.QObject):
             return
 
     # Disable Buttons
-    local_remote_stacked_widgets[tab_index].setEnabled(False)
-    network_type_widgets[tab_index].setEnabled(False)
+    local_remote_stacked_widget.setEnabled(False)
+    network_type_widget.setEnabled(False)
     QtWidgets.QApplication.processEvents()
 
     # Send Message for HIPRFISR to Create Sensor Node Connection
@@ -2582,23 +2176,11 @@ async def meshtastic_disconnect(HWSelect: QtCore.QObject):
     """
     # Disconnect
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
-    stacked_widgets = [
-        HWSelect.stackedWidget_local_remote_1,
-        HWSelect.stackedWidget_local_remote_2,
-        HWSelect.stackedWidget_local_remote_3,
-        HWSelect.stackedWidget_local_remote_4,
-        HWSelect.stackedWidget_local_remote_5,
-    ]
-    network_type_widgets = [
-        HWSelect.comboBox_network_type_1,
-        HWSelect.comboBox_network_type_2,
-        HWSelect.comboBox_network_type_3,
-        HWSelect.comboBox_network_type_4,
-        HWSelect.comboBox_network_type_5,
-    ]
+    stacked_widget = getattr(HWSelect, f"stackedWidget_local_remote_{tab_index+1}")
+    network_type_widget = getattr(HWSelect, f"comboBox_network_type_{tab_index+1}")
 
-    stacked_widgets[tab_index].setCurrentIndex(3)
-    network_type_widgets[tab_index].setEnabled(True)
+    stacked_widget.setCurrentIndex(3)
+    network_type_widget.setEnabled(True)
 
     # Send Message for HIPRFISR to end Meshtastic Serial Connection
     await HWSelect.dashboard.backend.disconnectFromMeshtastic(str(tab_index))
@@ -2842,3 +2424,41 @@ async def ip_ping(HWSelect: QtCore.QObject):
     # Send Message to Backend
     tab_index = HWSelect.tabWidget_nodes.currentIndex()
     await HWSelect.dashboard.backend.pingIP(str(tab_index))  
+
+
+@qasync.asyncSlot(QtCore.QObject)
+async def ip_node_refresh(HWSelect: QtCore.QObject):
+    """
+    Send command to HiprFisr to.
+    """
+    # Send Message to Backend
+    tab_index = HWSelect.tabWidget_nodes.currentIndex()
+    await HWSelect.dashboard.backend.nodeRefreshIP(str(tab_index))
+
+
+@qasync.asyncSlot(QtCore.QObject)
+async def ip_node_select(HWSelect: QtCore.QObject):
+    """
+    Send command to HiprFisr to.
+    """
+    # Get Node UUID
+    tab_index = HWSelect.tabWidget_nodes.currentIndex()
+    tableWidget_node_list_widget = getattr(HWSelect, f"tableWidget_node_list_{tab_index+1}")
+
+    row = tableWidget_node_list_widget.currentRow()
+    node_uuid = str(tableWidget_node_list_widget.item(row,0).text())
+
+    # Send Message to Backend
+    await HWSelect.dashboard.backend.nodeSelectIP(str(tab_index), node_uuid)
+
+
+@qasync.asyncSlot(QtCore.QObject)
+async def ip_node_reconnect(HWSelect: QtCore.QObject):
+    """
+    Send command to HiprFisr to.
+    """
+    # Send tab index
+    tab_index = HWSelect.tabWidget_nodes.currentIndex()
+
+    # Send Message to Backend
+    await HWSelect.dashboard.backend.nodeReconnectIP(str(tab_index))

@@ -69,6 +69,8 @@ class Address:
             self.heartbeat_channel = f"{self.protocol}://{self.address}-hb"
             self.message_channel = f"{self.protocol}://{self.address}-msg"
 
+        print("Address parsed:", self.heartbeat_channel, self.message_channel)
+
     def __str__(self) -> str:
         base_address = f"{self.protocol}://{self.address}"
         return (

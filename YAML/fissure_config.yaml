@@ -4,6 +4,7 @@ SOI_trigger_time: 0
 SOI_trigger_timeout: 10
 auto_connect_hiprfisr: true
 buffer_size_interval: 2
+callsign_prefix: FTN
 clear_log_file_on_startup: true
 color1: '#F4F4F4'
 color10: '#FEFEFE'

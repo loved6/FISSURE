@@ -68,6 +68,8 @@ class DashboardBackend:
 
 
     def __init__(self, frontend: QtCore.QObject):
+        """
+        """        
         self.logger = fissure.utils.get_logger(f"{fissure.comms.Identifiers.DASHBOARD}.backend")       
         self.logger.info("=== INITIALIZING ===")
 
@@ -91,7 +93,13 @@ class DashboardBackend:
             fissure.comms.Identifiers.HIPRFISR: None,
             fissure.comms.Identifiers.PD: None,
             fissure.comms.Identifiers.TSI: None,
-            fissure.comms.Identifiers.SENSOR_NODE: [None] * 5,
+            fissure.comms.Identifiers.SENSOR_NODE: [
+                {"time": None, "interval": None},
+                {"time": None, "interval": None},
+                {"time": None, "interval": None},
+                {"time": None, "interval": None},
+                {"time": None, "interval": None},
+            ],
         }
         self.hiprfisr_address = None
         self.hiprfisr_connected = False
@@ -102,6 +110,7 @@ class DashboardBackend:
         self.shutdown = False
         self.shutting_down_message_received = False
         self.shutdown_complete = False
+        self.child_tasks = []
 
         # Load Library
         self.plugins = []
@@ -137,12 +146,28 @@ class DashboardBackend:
 
 
     async def shutdown_comms(self):
-        if self.hiprfisr_connected is True:
+        """
+        Cleanly shut down backend communications.
+        Must be safe to call multiple times.
+        """
+
+        # If connected, perform a graceful disconnect
+        if self.hiprfisr_connected:
             if self.__local_hiprfisr_process is not None:
                 await self.shutdown_hiprfisr()
             else:
                 await self.disconnect_from_hiprfisr()
-        self.hiprfisr_socket.shutdown()
+
+        # SAFE SHUTDOWN (avoid NoneType crash)
+        sock = self.hiprfisr_socket
+        if sock is not None and hasattr(sock, "shutdown"):
+            try:
+                sock.shutdown()
+            except Exception:
+                pass
+
+        # Ensure we never reference it again
+        self.hiprfisr_socket = None
 
 
     def start(self):
@@ -175,16 +200,16 @@ class DashboardBackend:
         self.logger.debug(f"registered {len(callbacks)} callbacks from {ctx.__name__}")
 
 
-    # async def heartbeat_loop(self):
-    #     """
-    #     Sends and reads heartbeat messages, separate from event loop to prevent freezing on blocking events.
-    #     """
-    #     while self.shutdown is False:
-    #         await self.send_heartbeat()
-    #         await self.recv_heartbeat()
-    #         self.check_heartbeats()
+    async def heartbeat_loop(self):
+        """
+        Sends and reads heartbeat messages, separate from event loop to prevent freezing on blocking events.
+        """
+        while self.shutdown is False:
+            await self.send_heartbeat()
+            await self.recv_heartbeat()
+            self.check_heartbeats()
 
-    #         await asyncio.sleep(EVENT_LOOP_DELAY)
+            await asyncio.sleep(EVENT_LOOP_DELAY)
 
 
     async def __eventLoop__(self):
@@ -193,15 +218,10 @@ class DashboardBackend:
         Instead call `DashboardBackend.start()` to run in the Qt/asyncio Event Loop
         """
         # Start Heartbeat Loop
-        # loop = asyncio.get_event_loop()
-        # heartbeat_task = loop.create_task(self.heartbeat_loop())
+        heartbeat_task = asyncio.create_task(self.heartbeat_loop())
+        self.child_tasks.append(heartbeat_task)
 
         while self.shutdown is False:
-            await self.send_heartbeat()
-            await asyncio.sleep(0)
-            await self.recv_heartbeat()
-            await asyncio.sleep(0)
-            self.check_heartbeats()
 
             if self.hiprfisr_connected:
                 await self.read_hiprfisr_messages()
@@ -222,15 +242,20 @@ class DashboardBackend:
                 if self.library != None and self.frontend_initialized == False:
                     self.frontend_initialized = True
                     self.frontend.__init2__()
-            else:
-                # yield to pass control flow back to event loop
-                await asyncio.sleep(1)
             
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(EVENT_LOOP_DELAY)
 
-        # # Ensure the Heartbeat Loop is Stopped
-        # heartbeat_task.cancel()
-        # await heartbeat_task
+        # Ensure the Heartbeat Loop is Stopped
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except asyncio.CancelledError:
+            pass
+
+        # Close Running Tasks
+        for task in self.child_tasks:
+            task.cancel()
+        await asyncio.gather(*self.child_tasks, return_exceptions=True)
 
         # Shut Down Comms
         await self.shutdown_comms()
@@ -239,7 +264,7 @@ class DashboardBackend:
         await asyncio.sleep(0)  # prevents errors/warnings
 
         fissure.utils.save_fissure_config(data=self.settings)  # Check for Remember Configuration is in save_fissure_config
-        self.logger.info("=== SHUTDOWN ===")
+        self.logger.info("=== BACKEND SHUTDOWN ===")
         self.shutdown_complete = True
 
 
@@ -260,40 +285,78 @@ class DashboardBackend:
 
 
     async def recv_heartbeat(self):
-        heartbeat = await self.hiprfisr_socket.recv_heartbeat()
+        """
+        """
+        if self.shutdown:
+            return
 
-        if heartbeat is not None:
-            heartbeat_time = float(heartbeat.get(fissure.comms.MessageFields.TIME))
-            params = heartbeat.get(fissure.comms.MessageFields.PARAMETERS)
-            self.heartbeats[fissure.comms.Identifiers.HIPRFISR] = heartbeat_time
-            self.logger.debug(f"received HiprFisr heartbeat ({fissure.utils.get_timestamp(heartbeat_time)})")
+        try:
+            heartbeat = await self.hiprfisr_socket.recv_heartbeat()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            # socket closed / shutdown in progress
+            return
 
-            if params is not None:
-                self.heartbeats[fissure.comms.Identifiers.PD] = params.get(fissure.comms.Identifiers.PD)
-                self.heartbeats[fissure.comms.Identifiers.TSI] = params.get(fissure.comms.Identifiers.TSI)
-                self.heartbeats[fissure.comms.Identifiers.SENSOR_NODE] = params.get(
-                    fissure.comms.Identifiers.SENSOR_NODE
-                )
+        if heartbeat is None or self.shutdown:
+            return
+
+        # HIPRFISR heartbeat timestamp
+        heartbeat_time = float(heartbeat.get(fissure.comms.MessageFields.TIME))
+        self.heartbeats[fissure.comms.Identifiers.HIPRFISR] = heartbeat_time
+        self.logger.debug(
+            f"received HiprFisr heartbeat ({fissure.utils.get_timestamp(heartbeat_time)})"
+        )
+
+        params = heartbeat.get(fissure.comms.MessageFields.PARAMETERS)
+        if params is None or self.shutdown:
+            return
+
+        # PD/TSI heartbeats
+        self.heartbeats[fissure.comms.Identifiers.PD] = params.get(fissure.comms.Identifiers.PD)
+        self.heartbeats[fissure.comms.Identifiers.TSI] = params.get(fissure.comms.Identifiers.TSI)
+
+        # sensor nodes
+        sensor_data = params.get(fissure.comms.Identifiers.SENSOR_NODE)
+        if sensor_data is None or self.shutdown:
+            return
+
+        node_list = self.heartbeats[fissure.comms.Identifiers.SENSOR_NODE]
+
+        incoming_times = sensor_data.get(fissure.comms.MessageFields.TIME, [])
+        incoming_intervals = sensor_data.get(fissure.comms.MessageFields.INTERVAL, [])
+
+        for idx in range(5):
+            if idx < len(incoming_times) and incoming_times[idx] is not None:
+                node_list[idx]["time"] = incoming_times[idx]
+
+            if idx < len(incoming_intervals) and incoming_intervals[idx] is not None:
+                node_list[idx]["interval"] = incoming_intervals[idx]
 
 
     def check_heartbeats(self):
         current_time = time.time()
-        cutoff_interval = float(self.settings.get("failure_multiple")) * float(self.settings.get("heartbeat_interval"))
-        cutoff_time = current_time - cutoff_interval
 
-        # HiprFisr Check
-        last_hiprfisr_heartbeat = self.heartbeats.get(fissure.comms.Identifiers.HIPRFISR)
-        if last_hiprfisr_heartbeat is not None:
-            if self.hiprfisr_connected and (last_hiprfisr_heartbeat < cutoff_time):
+        # Global fallback interval used for HIPRFISR, PD, TSI, and nodes that have not reported yet
+        global_interval = float(self.settings.get("heartbeat_interval"))
+        failure_multiple = float(self.settings.get("failure_multiple"))
+
+        #
+        # --- HIPRFISR CHECK ---
+        #
+        last_hiprfisr = self.heartbeats.get(fissure.comms.Identifiers.HIPRFISR)
+        hiprfisr_cutoff = current_time - (global_interval * failure_multiple)
+
+        if last_hiprfisr is not None:
+            if self.hiprfisr_connected and last_hiprfisr < hiprfisr_cutoff:
                 self.hiprfisr_connected = False
                 if self.session_active:
                     self.logger.warning("hiprfisr connection lost")
-                    # self.frontend.statusBar.hiprfisr.setText("HIPRFISR: OK")  # FIX: Causes error on HIPRFISR connect
                     self.frontend.signals.ComponentStatus.emit(
                         fissure.comms.Identifiers.HIPRFISR, False, self.frontend.statusBar()
                     )
 
-            elif (not self.hiprfisr_connected) and (last_hiprfisr_heartbeat > cutoff_time):
+            elif (not self.hiprfisr_connected) and last_hiprfisr > hiprfisr_cutoff:
                 self.hiprfisr_connected = True
                 if self.session_active:
                     self.logger.warning("hiprfisr connection restored")
@@ -303,74 +366,145 @@ class DashboardBackend:
                 else:
                     self.session_active = True
 
-        # PD Check
-        last_pd_heartbeat = self.heartbeats.get(fissure.comms.Identifiers.PD)
-        if last_pd_heartbeat is not None:
-            if self.pd_connected and (last_pd_heartbeat < cutoff_time):
+        #
+        # --- PD CHECK ---
+        #
+        last_pd = self.heartbeats.get(fissure.comms.Identifiers.PD)
+        pd_cutoff = current_time - (global_interval * failure_multiple)
+
+        if last_pd is not None:
+            if self.pd_connected and last_pd < pd_cutoff:
                 self.pd_connected = False
                 self.frontend.signals.ComponentStatus.emit(
                     fissure.comms.Identifiers.PD, False, self.frontend.statusBar()
                 )
-
-            elif (not self.pd_connected) and (last_pd_heartbeat > cutoff_time):
+            elif (not self.pd_connected) and last_pd > pd_cutoff:
                 self.pd_connected = True
                 self.frontend.signals.ComponentStatus.emit(
                     fissure.comms.Identifiers.PD, True, self.frontend.statusBar()
                 )
 
-        # TSI Check
-        last_tsi_heartbeat = self.heartbeats.get(fissure.comms.Identifiers.TSI)
-        if last_tsi_heartbeat is not None:
-            if self.tsi_connected and (last_tsi_heartbeat < cutoff_time):
+        #
+        # --- TSI CHECK ---
+        #
+        last_tsi = self.heartbeats.get(fissure.comms.Identifiers.TSI)
+        tsi_cutoff = current_time - (global_interval * failure_multiple)
+
+        if last_tsi is not None:
+            if self.tsi_connected and last_tsi < tsi_cutoff:
                 self.tsi_connected = False
                 self.frontend.signals.ComponentStatus.emit(
                     fissure.comms.Identifiers.TSI, False, self.frontend.statusBar()
                 )
-
-            elif (not self.tsi_connected) and (last_tsi_heartbeat > cutoff_time):
+            elif (not self.tsi_connected) and last_tsi > tsi_cutoff:
                 self.tsi_connected = True
                 self.frontend.signals.ComponentStatus.emit(
                     fissure.comms.Identifiers.TSI, True, self.frontend.statusBar()
                 )
 
-        # Sensor Node Checks
-        sensor_node_heartbeats = self.heartbeats.get(fissure.comms.Identifiers.SENSOR_NODE)
-        for idx in range(0, 5):
-            last_sensor_node_heartbeat = sensor_node_heartbeats[idx]
-            if last_sensor_node_heartbeat is not None:
-                if self.sensor_node_connected[idx] and (last_sensor_node_heartbeat < cutoff_time):
+        #
+        # --- SENSOR NODE CHECKS ---
+        #
+        sensor_nodes = self.heartbeats.get(fissure.comms.Identifiers.SENSOR_NODE)
+
+        for idx in range(5):
+            node_record = sensor_nodes[idx]
+
+            # SAFETY: No record at all (None) → treat as disconnected
+            if node_record is None:
+                if self.sensor_node_connected[idx]:  # only emit transition
                     self.sensor_node_connected[idx] = False
                     self.frontend.signals.ComponentStatus.emit(
-                        f"fissure.comms.Identifiers.SENSOR_NODE_{idx+1}", False, self.frontend.statusBar()
+                        f"fissure.comms.Identifiers.SENSOR_NODE_{idx+1}",
+                        False,
+                        self.frontend.statusBar()
                     )
-                elif (not self.sensor_node_connected[idx]) and (last_sensor_node_heartbeat > cutoff_time):
-                    self.sensor_node_connected[idx] = True
+                continue
+
+            #
+            # At this point, node_record is a dict with: {"time": X, "interval": Y}
+            #
+
+            # If time exists but is None → disconnected
+            if node_record["time"] is None:
+                if self.sensor_node_connected[idx]:
+                    self.sensor_node_connected[idx] = False
                     self.frontend.signals.ComponentStatus.emit(
-                        f"fissure.comms.Identifiers.SENSOR_NODE_{idx+1}", False, self.frontend.statusBar()
+                        f"fissure.comms.Identifiers.SENSOR_NODE_{idx+1}",
+                        False,
+                        self.frontend.statusBar()
                     )
-            else:
+                continue
+
+            last_time = float(node_record["time"])
+
+            # Use node's interval if present, otherwise fallback to global
+            interval = (
+                float(node_record["interval"])
+                if node_record["interval"] is not None
+                else global_interval
+            )
+
+            node_cutoff = current_time - (interval * failure_multiple)
+
+            # Transition to disconnected
+            if self.sensor_node_connected[idx] and last_time < node_cutoff:
+                self.sensor_node_connected[idx] = False
                 self.frontend.signals.ComponentStatus.emit(
-                    f"fissure.comms.Identifiers.SENSOR_NODE_{idx+1}", False, self.frontend.statusBar()
+                    f"fissure.comms.Identifiers.SENSOR_NODE_{idx+1}",
+                    False,
+                    self.frontend.statusBar()
+                )
+
+            # Transition to connected
+            elif (not self.sensor_node_connected[idx]) and last_time > node_cutoff:
+                self.sensor_node_connected[idx] = True
+                self.frontend.signals.ComponentStatus.emit(
+                    f"fissure.comms.Identifiers.SENSOR_NODE_{idx+1}",
+                    True,
+                    self.frontend.statusBar()
                 )
 
 
     async def read_hiprfisr_messages(self):
-        # TODO
-        msg = await self.hiprfisr_socket.recv_msg()
-        if msg is not None:
-            msg_type = msg.get(fissure.comms.MessageFields.TYPE)
-            if msg_type == fissure.comms.MessageTypes.HEARTBEATS:
-                self.logger.warning(
-                    f"received heartbeat on message channel (from {msg.get(fissure.comms.MessageFields.IDENTIFIER)})"
-                )
-            elif msg_type == fissure.comms.MessageTypes.COMMANDS:
+        """
+        """
+        if self.shutdown:
+            return
+
+        try:
+            msg = await self.hiprfisr_socket.recv_msg()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            # socket is closed or dying during shutdown
+            return
+
+        if msg is None or self.shutdown:
+            return
+
+        msg_type = msg.get(fissure.comms.MessageFields.TYPE)
+
+        if msg_type == fissure.comms.MessageTypes.HEARTBEATS:
+            self.logger.warning(
+                f"received heartbeat on message channel (from {msg.get(fissure.comms.MessageFields.IDENTIFIER)})"
+            )
+
+        elif msg_type == fissure.comms.MessageTypes.COMMANDS:
+            try:
                 await self.hiprfisr_socket.run_callback(self, msg)
-            elif msg_type == fissure.comms.MessageTypes.STATUS:
-                msg_name = msg.get(fissure.comms.MessageFields.MESSAGE_NAME)
-                if msg_name == "Disconnect OK":
-                    self.session_active = False
-                elif msg_name == "Shutting Down":
-                    self.shutting_down_message_received = True
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                # ignore callback errors during shutdown
+                pass
+
+        elif msg_type == fissure.comms.MessageTypes.STATUS:
+            msg_name = msg.get(fissure.comms.MessageFields.MESSAGE_NAME)
+            if msg_name == "Disconnect OK":
+                self.session_active = False
+            elif msg_name == "Shutting Down":
+                self.shutting_down_message_received = True
 
 
     async def start_local_hiprfisr(self):
@@ -415,16 +549,24 @@ class DashboardBackend:
             fissure.comms.MessageFields.MESSAGE_NAME: "disconnect",
         }
         await self.hiprfisr_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, disconnect_notice)
-        while self.session_active is not False:
+
+        while self.session_active:
             msg = await self.hiprfisr_socket.recv_msg()
+
+            # HIPRFISR is gone — stop waiting
+            if msg is None:
+                self.logger.warning("HIPRFISR went away during disconnect — closing session immediately")
+                self.close_session()
+                break
+
             if (
-                msg is not None
-                and msg.get(fissure.comms.MessageFields.IDENTIFIER) == fissure.comms.Identifiers.HIPRFISR
+                msg.get(fissure.comms.MessageFields.IDENTIFIER) == fissure.comms.Identifiers.HIPRFISR
                 and msg.get(fissure.comms.MessageFields.TYPE) == fissure.comms.MessageTypes.STATUS
                 and msg.get(fissure.comms.MessageFields.MESSAGE_NAME) == "Disconnect OK"
             ):
                 self.logger.info("=== DISCONNECT ===")
                 self.close_session()
+                break
 
 
     async def shutdown_hiprfisr(self):
@@ -435,53 +577,72 @@ class DashboardBackend:
                 fissure.comms.Parameters.IDENTIFIERS: [fissure.comms.Identifiers.HIPRFISR]
             },
         }
-        await self.hiprfisr_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, shutdown_cmd)
 
-        while self.session_active is not False:
-            if self.shutting_down_message_received == True:
-                self.logger.warning("Received shutdown notice from HIPRFISR")
-                self.close_session()
-            await asyncio.sleep(.1)
+        # Send shutdown
+        try:
+            await self.hiprfisr_socket.send_msg(
+                fissure.comms.MessageTypes.COMMANDS,
+                shutdown_cmd
+            )
+        except Exception:
+            # HIPRFISR already dead
+            self.logger.warning("HIPRFISR unreachable — assuming already dead.")
+            # self.close_session()
+            # return
+        
+        # Immediately close our session without waiting.
+        self.close_session()
+
+        # # Wait for HIPRFISR exit message OR socket close
+        # while self.session_active:
+        #     if self.shutting_down_message_received:
+        #         self.logger.warning("Received shutdown notice from HIPRFISR")
+        #         self.close_session()
+        #         break
+
+        #     msg = await self.hiprfisr_socket.recv_msg()
+        #     if msg is None:
+        #         self.logger.warning("HIPRFISR socket closed — forcing shutdown")
+        #         self.close_session()
+        #         break
+
+        #     await asyncio.sleep(0.1)
 
 
     def close_session(self):
-        self.hiprfisr_socket.disconnect(self.hiprfisr_address)
-        self.heartbeats.update(
-            {
-                fissure.comms.Identifiers.DASHBOARD: 0,
-                fissure.comms.Identifiers.HIPRFISR: 0,
-                fissure.comms.Identifiers.PD: 0,
-                fissure.comms.Identifiers.TSI: 0,
-                fissure.comms.Identifiers.SENSOR_NODE: [None] * 5,
-            }
-        )
+        """
+        """
+        sock = self.hiprfisr_socket
+
+        if sock is not None:
+
+            # CLEAN WAY: Close the real ZMQ sockets
+            try:
+                sock.close_sockets()
+            except Exception as e:
+                print("Error closing HIPRFISR sockets:", e)
+
+        # Wipe references
+        self.hiprfisr_socket = None
         self.hiprfisr_address = None
+
+        # Reset connections
+        self.heartbeats[fissure.comms.Identifiers.DASHBOARD] = 0
+        self.heartbeats[fissure.comms.Identifiers.HIPRFISR] = 0
+        self.heartbeats[fissure.comms.Identifiers.PD] = 0
+        self.heartbeats[fissure.comms.Identifiers.TSI] = 0
+        self.heartbeats[fissure.comms.Identifiers.SENSOR_NODE] = [None] * 5
+
         self.hiprfisr_connected = False
         self.pd_connected = False
         self.tsi_connected = False
-        self.sensor_node_connected = [False, False, False, False, False]
+        self.sensor_node_connected = [False] * 5
         self.session_active = False
 
-        # Reset frontend / database state for clean reconnect
+        # Reset frontend/database
         self.initial_database_retrieval = True
         self.frontend_initialized = False
         self.library = None
-
-
-    async def launch_local_sensor_node(self, sensor_node_id, ip_address, msg_port, hb_port, recall_settings):
-        PARAMETERS = {
-            "sensor_node_id": str(sensor_node_id),
-            "ip_address": ip_address,
-            "msg_port": msg_port,
-            "hb_port": hb_port,
-            "recall_settings": recall_settings,
-        }
-        launch_cmd = {
-            fissure.comms.MessageFields.IDENTIFIER: fissure.comms.Identifiers.DASHBOARD,
-            fissure.comms.MessageFields.MESSAGE_NAME: "connectToSensorNodeIP",
-            fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
-        }
-        await self.hiprfisr_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, launch_cmd)
 
 
     async def connect_remote_sensor_node(self, sensor_node_id, ip_address, msg_port, hb_port, recall_settings):
@@ -516,12 +677,9 @@ class DashboardBackend:
         await self.hiprfisr_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, terminate_cmd)
 
 
-    async def disconnect_remote_sensor_node(self, sensor_node_id, ip_address, msg_port, hb_port, delete_node):
+    async def disconnect_remote_sensor_node(self, sensor_node_id, delete_node):
         PARAMETERS = {
-            "sensor_node_id": str(sensor_node_id),
-            "ip_address": ip_address,
-            "msg_port": msg_port,
-            "hb_port": hb_port,
+            "dashboard_index": str(sensor_node_id),
             "delete_node": delete_node,
         }
         disconnect_cmd = {
@@ -2226,7 +2384,60 @@ class DashboardBackend:
                     fissure.comms.MessageFields.MESSAGE_NAME: "pingIP",
                     fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
             }
-            await self.hiprfisr_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)   
+            await self.hiprfisr_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+
+    async def nodeRefreshIP(self, dashboard_node_index):
+        """
+        Sends a message to the HIPRFISR to.
+        """
+        # Send the Message
+        if self.hiprfisr_connected is True:
+            PARAMETERS = {
+                "dashboard_node_index": dashboard_node_index
+            }
+            msg = {
+                    fissure.comms.MessageFields.IDENTIFIER: fissure.comms.Identifiers.DASHBOARD,
+                    fissure.comms.MessageFields.MESSAGE_NAME: "nodeRefreshIP",
+                    fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
+            }
+            await self.hiprfisr_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+
+    async def nodeSelectIP(self, dashboard_node_index, node_uuid):
+        """
+        Sends a message to the HIPRFISR to.
+        """
+        # Send the Message
+        if self.hiprfisr_connected is True:
+            PARAMETERS = {
+                "dashboard_node_index": dashboard_node_index,
+                "node_uuid": node_uuid
+            }
+            msg = {
+                    fissure.comms.MessageFields.IDENTIFIER: fissure.comms.Identifiers.DASHBOARD,
+                    fissure.comms.MessageFields.MESSAGE_NAME: "nodeSelectIP",
+                    fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
+            }
+            await self.hiprfisr_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+
+    async def nodeReconnectIP(self, dashboard_node_index):
+        """
+        Sends a message to the HIPRFISR to.
+        """
+        # Send the Message
+        if self.hiprfisr_connected is True:
+            PARAMETERS = {
+                "dashboard_node_index": dashboard_node_index,
+            }
+            msg = {
+                    fissure.comms.MessageFields.IDENTIFIER: fissure.comms.Identifiers.DASHBOARD,
+                    fissure.comms.MessageFields.MESSAGE_NAME: "nodeReconnectIP",
+                    fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
+            }
+            await self.hiprfisr_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
 
 #######################################################################################
 ############################## Low Throughput Messages ################################

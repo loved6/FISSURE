@@ -33,6 +33,10 @@ class HardwareSelectDialog(QtWidgets.QDialog, UI_Types.HW_Select):
         self.tabWidget_nodes.setTabEnabled(3, False)
         self.tabWidget_nodes.setTabEnabled(4, False)
 
+        # Hide Import/Export until fixed
+        self.pushButton_import.setVisible(False)  # TODO: does import/export make sense for the current connection mechanism?
+        self.pushButton_export.setVisible(False)
+
         # Enable Tabs for Configured Nodes
         get_sensor_node = ["sensor_node1", "sensor_node2", "sensor_node3", "sensor_node4", "sensor_node5"]
         for n in range(0, len(get_sensor_node)):
@@ -118,41 +122,6 @@ class HardwareSelectDialog(QtWidgets.QDialog, UI_Types.HW_Select):
             self.radioButton_remote_4,
             self.radioButton_remote_5,
         ]
-        hardware_tsi_widgets = [
-            self.tableWidget_tsi_1,
-            self.tableWidget_tsi_2,
-            self.tableWidget_tsi_3,
-            self.tableWidget_tsi_4,
-            self.tableWidget_tsi_5,
-        ]
-        hardware_pd_widgets = [
-            self.tableWidget_pd_1,
-            self.tableWidget_pd_2,
-            self.tableWidget_pd_3,
-            self.tableWidget_pd_4,
-            self.tableWidget_pd_5,
-        ]
-        hardware_attack_widgets = [
-            self.tableWidget_attack_1,
-            self.tableWidget_attack_2,
-            self.tableWidget_attack_3,
-            self.tableWidget_attack_4,
-            self.tableWidget_attack_5,
-        ]
-        hardware_iq_widgets = [
-            self.tableWidget_iq_1,
-            self.tableWidget_iq_2,
-            self.tableWidget_iq_3,
-            self.tableWidget_iq_4,
-            self.tableWidget_iq_5,
-        ]
-        hardware_archive_widgets = [
-            self.tableWidget_archive_1,
-            self.tableWidget_archive_2,
-            self.tableWidget_archive_3,
-            self.tableWidget_archive_4,
-            self.tableWidget_archive_5,
-        ]
         autorun_widgets = [
             self.label2_autorun_value_1,
             self.label2_autorun_value_2,
@@ -204,15 +173,16 @@ class HardwareSelectDialog(QtWidgets.QDialog, UI_Types.HW_Select):
         ]                        
 
         for n in range(0, len(get_sensor_node)):
+            # Already occupied
             if self.dashboard.backend.settings[get_sensor_node[n]]["nickname"] != "":
                 self.tabWidget_nodes.setTabText(n, str(self.dashboard.backend.settings[get_sensor_node[n]]["nickname"]))
                 if str(self.dashboard.backend.settings[get_sensor_node[n]]["local_remote"]).lower() == "local":
-                    HardwareSelectSlots.local(self, tab_index=n)
+                    pass
                 else:
                     if local_assigned:
                         local_widgets[n].setEnabled(False)
                     remote_widgets[n].setChecked(True)
-                    HardwareSelectSlots.remote(self, tab_index=n)
+                    
                 nickname_widgets[n].setPlainText(str(self.dashboard.backend.settings[get_sensor_node[n]]["nickname"]))
                 location_widgets[n].setPlainText(str(self.dashboard.backend.settings[get_sensor_node[n]]["location"]))
                 notes_widgets[n].setPlainText(str(self.dashboard.backend.settings[get_sensor_node[n]]["notes"]))
@@ -227,104 +197,14 @@ class HardwareSelectDialog(QtWidgets.QDialog, UI_Types.HW_Select):
                 meshtastic_serial_baud_rate_widgets[n].addItem(str(self.dashboard.backend.settings[get_sensor_node[n]]['meshtastic_serial_baud_rate']))
                 network_type_widgets[n].setCurrentText(str(self.dashboard.backend.settings[get_sensor_node[n]]['network_type']))
 
-                # TSI Table
-                tsi_hardware = self.dashboard.backend.settings[get_sensor_node[n]]["tsi"]
-                for row in range(0, len(tsi_hardware)):
-                    get_row = tsi_hardware[row]
-                    hardware_tsi_widgets[n].setRowCount(hardware_tsi_widgets[n].rowCount() + 1)
-                    for c in range(0, len(get_row)):
-                        get_text = get_row[c]
-                        new_item = QtWidgets.QTableWidgetItem(get_text)
-                        new_item.setTextAlignment(QtCore.Qt.AlignCenter)
-                        hardware_tsi_widgets[n].setItem(hardware_tsi_widgets[n].rowCount() - 1, c, new_item)
-
-                # PD Table
-                pd_hardware = self.dashboard.backend.settings[get_sensor_node[n]]["pd"]
-                for row in range(0, len(pd_hardware)):
-                    get_row = pd_hardware[row]
-                    hardware_pd_widgets[n].setRowCount(hardware_pd_widgets[n].rowCount() + 1)
-                    for c in range(0, len(get_row)):
-                        get_text = get_row[c]
-                        new_item = QtWidgets.QTableWidgetItem(get_text)
-                        new_item.setTextAlignment(QtCore.Qt.AlignCenter)
-                        hardware_pd_widgets[n].setItem(hardware_pd_widgets[n].rowCount() - 1, c, new_item)
-
-                # Attack Table
-                attack_hardware = self.dashboard.backend.settings[get_sensor_node[n]]["attack"]
-                for row in range(0, len(attack_hardware)):
-                    get_row = attack_hardware[row]
-                    hardware_attack_widgets[n].setRowCount(hardware_attack_widgets[n].rowCount() + 1)
-                    for c in range(0, len(get_row)):
-                        get_text = get_row[c]
-                        new_item = QtWidgets.QTableWidgetItem(get_text)
-                        new_item.setTextAlignment(QtCore.Qt.AlignCenter)
-                        hardware_attack_widgets[n].setItem(hardware_attack_widgets[n].rowCount() - 1, c, new_item)
-
-                # IQ Table
-                iq_hardware = self.dashboard.backend.settings[get_sensor_node[n]]["iq"]
-                for row in range(0, len(iq_hardware)):
-                    get_row = iq_hardware[row]
-                    hardware_iq_widgets[n].setRowCount(hardware_iq_widgets[n].rowCount() + 1)
-                    for c in range(0, len(get_row)):
-                        get_text = get_row[c]
-                        new_item = QtWidgets.QTableWidgetItem(get_text)
-                        new_item.setTextAlignment(QtCore.Qt.AlignCenter)
-                        hardware_iq_widgets[n].setItem(hardware_iq_widgets[n].rowCount() - 1, c, new_item)
-
-                # Archive Table
-                archive_hardware = self.dashboard.backend.settings[get_sensor_node[n]]["archive"]
-                for row in range(0, len(archive_hardware)):
-                    get_row = archive_hardware[row]
-                    hardware_archive_widgets[n].setRowCount(hardware_archive_widgets[n].rowCount() + 1)
-                    for c in range(0, len(get_row)):
-                        get_text = get_row[c]
-                        new_item = QtWidgets.QTableWidgetItem(get_text)
-                        new_item.setTextAlignment(QtCore.Qt.AlignCenter)
-                        hardware_archive_widgets[n].setItem(hardware_archive_widgets[n].rowCount() - 1, c, new_item)
-
-                # Resize the Tables
-                hardware_tsi_widgets[n].resizeColumnsToContents()
-                hardware_tsi_widgets[n].resizeRowsToContents()
-                hardware_tsi_widgets[n].horizontalHeader().setStretchLastSection(False)
-                hardware_tsi_widgets[n].horizontalHeader().setStretchLastSection(True)
-                hardware_pd_widgets[n].resizeColumnsToContents()
-                hardware_pd_widgets[n].resizeRowsToContents()
-                hardware_pd_widgets[n].horizontalHeader().setStretchLastSection(False)
-                hardware_pd_widgets[n].horizontalHeader().setStretchLastSection(True)
-                hardware_attack_widgets[n].resizeColumnsToContents()
-                hardware_attack_widgets[n].resizeRowsToContents()
-                hardware_attack_widgets[n].horizontalHeader().setStretchLastSection(False)
-                hardware_attack_widgets[n].horizontalHeader().setStretchLastSection(True)
-                hardware_iq_widgets[n].resizeColumnsToContents()
-                hardware_iq_widgets[n].resizeRowsToContents()
-                hardware_iq_widgets[n].horizontalHeader().setStretchLastSection(False)
-                hardware_iq_widgets[n].horizontalHeader().setStretchLastSection(True)
-                hardware_archive_widgets[n].resizeColumnsToContents()
-                hardware_archive_widgets[n].resizeRowsToContents()
-                hardware_archive_widgets[n].horizontalHeader().setStretchLastSection(False)
-                hardware_archive_widgets[n].horizontalHeader().setStretchLastSection(True)
-
-            # Nothing Saved, First Time
+            # No nickname
             else:
-                # Update Tab Text
-                if n == self.tabWidget_nodes.currentIndex():
-                    self.tabWidget_nodes.setTabText(n, "Node " + str(n + 1))
-                
-                # Check Local or Remote
-                if (
-                    (str(self.dashboard.backend.settings[get_sensor_node[n]]["local_remote"]).lower() == "local"
-                    or str(self.dashboard.backend.settings[get_sensor_node[n]]["local_remote"]).lower() == "")
-                    and (local_assigned == False)
-                ):
-                    local_widgets[n].setChecked(True)
-                    HardwareSelectSlots.local(self, tab_index=n)
-                else:
+                if local_assigned:
                     local_widgets[n].setEnabled(False)
+                    remote_widgets[n].setEnabled(False)  # TODO: gets enabled in sensorNodeDisconnected, needs local_assigned
                     remote_widgets[n].setChecked(True)
-                    HardwareSelectSlots.remote(self, tab_index=n)
 
-        # Update if Connected
-        for n in range(0, len(get_sensor_node)):
+            # Update if Connected
             if "OK" in self.dashboard.statusBar().sensor_nodes[n].text():
                 if self.dashboard.backend.settings[get_sensor_node[n]]["network_type"] == "IP":
                     self.sensorNodeConnected(n, False)
@@ -467,11 +347,21 @@ class HardwareSelectDialog(QtWidgets.QDialog, UI_Types.HW_Select):
             remote_actions_ip_ping_button.clicked.connect(lambda: HardwareSelectSlots.ip_ping(self))                              
 
         # Connect general slots
-        self.pushButton_import.clicked.connect(lambda: HardwareSelectSlots.importClicked(self, settings_dict="", recall_settings_on_connect=False))
+        self.pushButton_import.clicked.connect(lambda: HardwareSelectSlots.importClicked(self, settings_dict="", recall_settings_on_connect=False, first_time=True))
         self.pushButton_export.clicked.connect(lambda: HardwareSelectSlots.export(self))
         self.pushButton_apply.clicked.connect(lambda: HardwareSelectSlots.apply(self))
         self.pushButton_cancel.clicked.connect(self.close)
         self.pushButton_delete.clicked.connect(lambda: HardwareSelectSlots.delete(self))
+
+        # New Test Items, Move these up
+        pushButton_node_refresh_button: QtWidgets.QPushButton = getattr(self, f"pushButton_node_refresh_1")
+        pushButton_node_refresh_button.clicked.connect(lambda: HardwareSelectSlots.ip_node_refresh(self))
+        pushButton_node_select_button: QtWidgets.QPushButton = getattr(self, f"pushButton_node_select_1")
+        pushButton_node_select_button.clicked.connect(lambda: HardwareSelectSlots.ip_node_select(self))        
+        pushButton_ip_node_reconnect_button: QtWidgets.QPushButton = getattr(self, f"pushButton_ip_node_reconnect_1")
+        pushButton_ip_node_reconnect_button.clicked.connect(lambda: HardwareSelectSlots.ip_node_reconnect(self))
+
+        
 
 
     def scanReturn(self, tab_index, all_scan_results):
@@ -678,11 +568,15 @@ class HardwareSelectDialog(QtWidgets.QDialog, UI_Types.HW_Select):
 
     def sensorNodeConnected(self, tab_index=0, serial=False):
         """Updates widgets for a sensor node once it is connected to the rest of FISSURE."""
+        # Reload hardware tables
+        self.populate_hardware_tables(tab_index)
+
         # Adjust the tab index to match widget numbering
         tab_index += 1
 
         # Dynamically retrieve widgets
         stacked_widget = getattr(self, f"stackedWidget_local_remote_{tab_index}")
+        select_connect_stacked_widget = getattr(self, f"stackedWidget_select_connect_{tab_index}")
         bottom_stacked_widget = getattr(self, f"stackedWidget_bottom_{tab_index}")
         scan_pushbutton = getattr(self, f"pushButton_scan_{tab_index}")
         local_button = getattr(self, f"radioButton_local_{tab_index}")
@@ -695,12 +589,18 @@ class HardwareSelectDialog(QtWidgets.QDialog, UI_Types.HW_Select):
         msg_port_widget = getattr(self, f"textEdit_msg_port_{tab_index}")
         hb_port_widget = getattr(self, f"textEdit_hb_port_{tab_index}")
         find_widget = getattr(self, f"pushButton_find_{tab_index}")
+        network_type_label = getattr(self, f"label2_network_type_{tab_index}")
+        network_type_combobox = getattr(self, f"comboBox_network_type_{tab_index}")
 
         # Update widget states
         if serial == True:
             stacked_widget.setCurrentIndex(4)
+            if stacked_widget.currentIndex() != 6:
+                select_connect_stacked_widget.setCurrentIndex(1)
         else:
             stacked_widget.setCurrentIndex(2)
+            if stacked_widget.currentIndex() != 6:
+                select_connect_stacked_widget.setCurrentIndex(1)
         stacked_widget.setEnabled(True)
         bottom_stacked_widget.setCurrentIndex(0)
         scan_pushbutton.setEnabled(True)
@@ -714,6 +614,8 @@ class HardwareSelectDialog(QtWidgets.QDialog, UI_Types.HW_Select):
         msg_port_widget.setEnabled(True)
         hb_port_widget.setEnabled(True)
         find_widget.setEnabled(True)
+        network_type_label.setEnabled(False)
+        network_type_combobox.setEnabled(False)
 
 
     def importResults(self, settings_dict="", recall_settings_on_connect=False):
@@ -731,6 +633,7 @@ class HardwareSelectDialog(QtWidgets.QDialog, UI_Types.HW_Select):
 
         # Dynamically retrieve widgets
         stacked_widget = getattr(self, f"stackedWidget_local_remote_{tab_index}")
+        select_connect_stacked_widget = getattr(self, f"stackedWidget_select_connect_{tab_index}")
         bottom_stacked_widget = getattr(self, f"stackedWidget_bottom_{tab_index}")
         scan_pushbutton = getattr(self, f"pushButton_scan_{tab_index}")
         local_button = getattr(self, f"radioButton_local_{tab_index}")
@@ -739,24 +642,61 @@ class HardwareSelectDialog(QtWidgets.QDialog, UI_Types.HW_Select):
         find_widget = getattr(self, f"pushButton_find_{tab_index}")
         network_type_label = getattr(self, f"label2_network_type_{tab_index}")
         network_type_combobox = getattr(self, f"comboBox_network_type_{tab_index}")
+        
+        sensor_node = f"sensor_node{tab_index}"
 
         # Handle widget state based on connection type
         if local_button.isChecked():
-            stacked_widget.setCurrentIndex(0)
+            # Saved
+            if str(self.dashboard.backend.settings[sensor_node]["local_remote"]) == "local":
+                # Saved
+                stacked_widget.setCurrentIndex(6)  # Reconnect
+                select_connect_stacked_widget.setCurrentIndex(1)
+                local_button.setEnabled(False)
+                remote_button.setEnabled(False)
+            else:
+                # Local node launched but not saved
+                if self.new_local_connection[tab_index-1] == True:
+                    stacked_widget.setCurrentIndex(6)  # Reconnect
+                    select_connect_stacked_widget.setCurrentIndex(1)
+                    local_button.setEnabled(False)
+                    remote_button.setEnabled(False)
+                
+                # Not saved, not launched
+                else:
+                    stacked_widget.setCurrentIndex(0)  # Launch
+                    select_connect_stacked_widget.setCurrentIndex(2)
+                    local_button.setEnabled(True)
+                    remote_button.setEnabled(True)
+
             network_type_label.setVisible(False)
             network_type_combobox.setVisible(False)
         else:
+            # Remote disconnect, show reconnect
             if network_type_combobox.currentText() == "IP":
-                stacked_widget.setCurrentIndex(1)
+                stacked_widget.setCurrentIndex(6)
+                if str(self.dashboard.backend.settings[sensor_node]["nickname"]) == "":
+                    select_connect_stacked_widget.setCurrentIndex(0)
+                    local_button.setEnabled(True)
+                    remote_button.setEnabled(True)
+                    network_type_label.setEnabled(True)
+                    network_type_combobox.setEnabled(True)     
+                else:
+                    select_connect_stacked_widget.setCurrentIndex(1)
+                    local_button.setEnabled(False)
+                    remote_button.setEnabled(False)
+                    network_type_label.setEnabled(False)
+                    network_type_combobox.setEnabled(False)     
+
             elif network_type_combobox.currentText() == "Serial":
                 stacked_widget.setCurrentIndex(3)
+                # select_connect_stacked_widget.setCurrentIndex(1)
+
             network_type_label.setVisible(True)
             network_type_combobox.setVisible(True)
 
         bottom_stacked_widget.setCurrentIndex(1)
         scan_pushbutton.setEnabled(True)
-        local_button.setEnabled(True)
-        remote_button.setEnabled(True)
         details_stacked_widget.setCurrentIndex(0)
         find_widget.setEnabled(False)
 
@@ -806,8 +746,93 @@ class HardwareSelectDialog(QtWidgets.QDialog, UI_Types.HW_Select):
         """
         # Detect Connect without Saving
         if any(self.new_local_connection):
-            fissure.Dashboard.UI_Components.Qt5.errorMessage("Click Apply or disconnect from local sensor node before cancelling.")
+            fissure.Dashboard.UI_Components.Qt5.errorMessage("Click Apply or delete local sensor node before cancelling.")
             event.ignore()
         else:
             # Close Window
-            event.accept()        
+            event.accept()
+
+
+    def refreshNodes(self, dashboard_node_index, nodes):
+        """
+        Populate the table for the given dashboard node panel.
+        """
+        # Dynamic widget lookup
+        dashboard_node_index = str(int(dashboard_node_index) + 1)
+        table = getattr(self, f"tableWidget_node_list_{dashboard_node_index}")
+
+        # Clear existing rows
+        table.setRowCount(0)
+
+        # Iterate over nodes dict (uuid → info)
+        for uuid, info in nodes.items():
+            # Extract fields with fallbacks
+            ip            = info.get("ip", "—")
+            nickname      = info.get("nickname", "—")
+            # network_type  = info.get("network_type", "—")
+            last_seen_ts  = info.get("last_seen", None)
+            # connected     = info.get("connected", False)
+
+            # Format last seen
+            if last_seen_ts:
+                delta = time.time() - last_seen_ts
+                last_seen = f"{delta:.1f} sec ago"
+            else:
+                last_seen = "—"
+
+            # Format connected
+            # conn_text = "Yes" if connected else "No"
+
+            # Add row
+            row = table.rowCount()
+            table.insertRow(row)
+
+            table.setItem(row, 0, QtWidgets.QTableWidgetItem(str(uuid)))
+            table.setItem(row, 1, QtWidgets.QTableWidgetItem(str(ip)))
+            table.setItem(row, 2, QtWidgets.QTableWidgetItem(str(nickname)))
+            # table.setItem(row, 3, QtWidgets.QTableWidgetItem(str(network_type)))
+            table.setItem(row, 3, QtWidgets.QTableWidgetItem(str(last_seen)))
+            # table.setItem(row, 5, QtWidgets.QTableWidgetItem(str(conn_text)))
+
+            # Resize Table
+            table.resizeColumnsToContents()
+            table.resizeRowsToContents()
+            table.horizontalHeader().setStretchLastSection(False)
+            table.horizontalHeader().setStretchLastSection(True)
+
+
+    def populate_hardware_tables(self, n):
+
+        # Short alias to the node settings
+        get_sensor_node = ["sensor_node1", "sensor_node2", "sensor_node3", "sensor_node4", "sensor_node5"]
+        node_settings = self.dashboard.backend.settings[get_sensor_node[n]]
+
+        # Mapping of settings key -> table widget list
+        table_map = {
+            "tsi": getattr(self, f"tableWidget_tsi_{n+1}"),
+            "pd": getattr(self, f"tableWidget_pd_{n+1}"),
+            "attack": getattr(self, f"tableWidget_attack_{n+1}"),
+            "iq": getattr(self, f"tableWidget_iq_{n+1}"),
+            "archive": getattr(self, f"tableWidget_archive_{n+1}"),
+        }
+
+        # Populate each table
+        for key, table_widget in table_map.items():
+            table_widget.setRowCount(0)  # Clear existing rows (safer for refresh)
+
+            hardware_list = node_settings[key]
+
+            for row in range(len(hardware_list)):
+                row_items = hardware_list[row]
+                table_widget.insertRow(table_widget.rowCount())
+
+                for c, text in enumerate(row_items):
+                    item = QtWidgets.QTableWidgetItem(text)
+                    item.setTextAlignment(QtCore.Qt.AlignCenter)
+                    table_widget.setItem(table_widget.rowCount() - 1, c, item)
+
+            # Resize behavior for each table
+            table_widget.resizeColumnsToContents()
+            table_widget.resizeRowsToContents()
+            table_widget.horizontalHeader().setStretchLastSection(False)
+            table_widget.horizontalHeader().setStretchLastSection(True)

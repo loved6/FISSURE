@@ -691,3 +691,15 @@ Use 'sudo apt autoremove' to remove them.
 [*] Starting installer at Thu 16 Oct 2025 04:00:00 PM EDT
 [*] Launching interactive GUI installer...
 [*] Finished at Thu 16 Oct 2025 05:43:16 PM EDT
+[*] Starting installer at Tue 02 Dec 2025 05:47:54 PM EST
+[*] Launching interactive GUI installer...
+Validating sudoers file...
+/tmp/password_prompt_exceptions: parsed OK
+Validation successful. Installing sudoers file...
+sudo: /etc/sudoers.d/fissure is owned by uid 1000, should be 0
+No Password Prompts Setup completed successfully!
+-r--r----- 1 root root 1192 Dec  2 17:48 /etc/sudoers.d/fissure
+VERIFY SUCCESS
+
+Install Complete
+[*] Finished at Tue 02 Dec 2025 05:48:13 PM EST

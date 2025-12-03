@@ -84,8 +84,6 @@ async def startLocalSession(dashboard: QtCore.QObject):
 
     # Start Server Locally
     # connecting_button.setChecked(True)
-    dashboard.backend.initialize_comms()
-    dashboard.backend.start()
     await dashboard.backend.start_local_hiprfisr()
     # connecting_button.setChecked(False)
 
@@ -199,43 +197,33 @@ async def disconnect_hiprfisr(dashboard: QtCore.QObject):
 
 @qasync.asyncSlot(QtCore.QObject)
 async def shutdown_hiprfisr(dashboard: QtCore.QObject):
-    """
-    Send the `shutdown` command to the FISSURE Server, wait for the server to shutdown before closing the dashboard
 
-    :param dashboard: FISSURE Dashboard (Frontend) instance
-    :type dashboard: QtCore.QObject (Dashboard)
-    """
     status_bar = dashboard.statusBar()
-    disconnect_button: QtWidgets.QPushButton = status_bar.disconnect_button
-    connecting_button: QtWidgets.QPushButton = status_bar.connecting_button
-    shutdown_button: QtWidgets.QPushButton = status_bar.shutdown_button
+    disconnect_button = status_bar.disconnect_button
+    connecting_button = status_bar.connecting_button
+    shutdown_button = status_bar.shutdown_button
 
     disconnect_button.hide()
     connecting_button.hide()
     shutdown_button.setText("Shutting Down")
+    shutdown_button.setChecked(True)
 
     dashboard.logger.critical("[GUI] Shutting Down HIPRFISR")
+    
+    # Fire backend shutdown — DO NOT WAIT FOR ANY RESPONSE.
+    try:
+        asyncio.create_task(dashboard.backend.shutdown_hiprfisr())
+    except Exception as e:
+        dashboard.logger.warning(f"[GUI] Error sending shutdown: {e}")
 
-    shutdown_button.setChecked(True)
-    await dashboard.backend.shutdown_hiprfisr()  # Needs event loop running to know if shutdown happened   
+    # Force backend loop to end
+    dashboard.backend.shutdown = True
+
     shutdown_button.setChecked(False)
 
+    # Continue GUI cleanup
     back(dashboard)
-
-    # Disable Sensor Node Buttons
-    dashboard.ui.pushButton_top_node1.setEnabled(False)
-    dashboard.ui.pushButton_top_node2.setEnabled(False)
-    dashboard.ui.pushButton_top_node3.setEnabled(False)
-    dashboard.ui.pushButton_top_node4.setEnabled(False)
-    dashboard.ui.pushButton_top_node5.setEnabled(False)
-
-    # Disable Tabs
     dashboard.ui.tabWidget.setEnabled(False)
-
-    # Disable Start Button
-    dashboard.ui.pushButton_automation_system_start.setEnabled(False)
-
-    # Reset visible widgets and status in statusbar
     status_bar.update_session_status(False, None)
 
 

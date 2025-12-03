@@ -132,6 +132,7 @@ class TakReceiver(pytak.QueueWorker):
         """
         data_decode = data.decode()
         self._logger.debug("TAK Msg Received:\n%s\n", data_decode)
+        # print("TAK Msg Received:\n%s\n", data_decode)
         try:
             root = ET.fromstring(data_decode)
             uid = root.get("uid", "unknown")
@@ -153,7 +154,7 @@ class TakReceiver(pytak.QueueWorker):
                     await HiprFisrCallbacks.sendPluginActionTak(self.hipfisr, uid, sensor_node_id=0, plugin_name=plugin_name, action_name=action_name, parameters={})
                 elif remarks.text.startswith("FTN Requested: Plugin Action Stop"):
                     self._logger.info(f"FTN Plugin Stop Requested for UID: {uid}")
-                    await HiprFisrCallbacks.stop_all_plugin_operations(self.hipfisr, sensor_node_id=0)
+                    await HiprFisrCallbacks.stop_all_plugin_operations(self.hipfisr, uid, sensor_node_id=0)
         except ET.ParseError as e:
             self._logger.error("XML Parse Error: %s", e)
 

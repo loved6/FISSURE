@@ -17,7 +17,8 @@ Sensor Node:
           gps_source: gpsd           # Options: gpsd, Meshtastic, saved, internet
           gps_update_interval_seconds: 5
           gpsd_serial_port: '/dev/gps_usb'
-     hb_port: '5051'     
+     heartbeat_interval: 10
+     hb_port: '6100'     
      ip_address: '127.0.0.1'               # '127.0.0.1' for local, anything else for remote
      iq:
           0:
@@ -30,7 +31,7 @@ Sensor Node:
                uid: ''
      local_remote: remote                   # Does not need to be set, updated during init, "remote" or "local"
      location: small payload
-     msg_port: '5052'
+     msg_port: '6101'
      network_type: Meshtastic                      # "IP" or "Meshtastic"
      nickname: Pi Tactical Node           # "Local Sensor Node" for local, anything else for remote
      notes: Pi with Meshtastic

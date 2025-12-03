@@ -26,15 +26,17 @@ class Identifiers:
 
 class MessageFields:
     # Generic
-    IDENTIFIER = "Identifier"
+    IDENTIFIER = "Identifier"  # Full UUID for IP, 8 characters for Meshtastic
     MESSAGE_NAME = "MessageName"
-    SOURCE = "Source"
-    DESTINATION = "Destination"
+    SOURCE = "Source"  # TODO
+    DESTINATION = "Destination"  #TODO
 
     # Heartbeats
     HEARTBEAT = "Heartbeat"
     TIME = "Time"
     IP = "IP"
+    INTERVAL = "Interval"
+    UUID = "UUID"
 
     # Status/Commands
     CALLBACK = "callback"

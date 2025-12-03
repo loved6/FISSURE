@@ -82,6 +82,7 @@ class ProtocolDiscovery:
             fissure.comms.Identifiers.PD: None,
         }
         self.hiprfisr_connected = False
+        self.child_tasks = []
 
         # Initialze ZMQ Nodes
         self.initialize_comms()
@@ -126,15 +127,8 @@ class ProtocolDiscovery:
         """
         Send shutdown notice, disconnect and shutdown ZMQ sockets
         """
-        shutdown_notice = {
-            fissure.comms.MessageFields.IDENTIFIER: self.identifier,
-            fissure.comms.MessageFields.MESSAGE_NAME: "Shutting Down",
-            fissure.comms.MessageFields.PARAMETERS: "",
-        }
-        await self.hiprfisr_socket.send_msg(fissure.comms.MessageTypes.STATUS, shutdown_notice)
-
-        self.hiprfisr_socket.disconnect(self.hiprfisr_address)
-        self.hiprfisr_socket.shutdown()
+        # Close Heartbeats and Messages
+        self.hiprfisr_socket.close_sockets()
 
 
     def register_callbacks(self, ctx: ModuleType):
@@ -172,6 +166,7 @@ class ProtocolDiscovery:
 
         # Start Heartbeat Loop
         heartbeat_task = asyncio.create_task(self.heartbeat_loop())
+        self.child_tasks.append(heartbeat_task)
 
         # Load Database Cache
         await self.retrieveDatabaseCachePD()
@@ -193,8 +188,15 @@ class ProtocolDiscovery:
         # Clean Up
         self.stopPD()
 
+        # Close Running Tasks
+        for task in self.child_tasks:
+            task.cancel()
+        await asyncio.gather(*self.child_tasks, return_exceptions=True)
+
+        # Shut Down Comms
         await self.shutdown_comms()
-        self.logger.info("=== SHUTDOWN ===")
+
+        self.logger.info("=== PD SHUTDOWN COMPLETE ===")
 
 
     async def send_heartbeat(self):
@@ -250,7 +252,7 @@ class ProtocolDiscovery:
         Receive and parse messages from the HiprFisr and carry out commands
         """
         received_message = ""
-        while received_message is not None:
+        while (received_message is not None) and not self.shutdown:
             received_message = await self.hiprfisr_socket.recv_msg()
             if received_message is not None:
                 type = received_message.get(fissure.comms.MessageFields.TYPE)

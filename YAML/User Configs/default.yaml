@@ -4,6 +4,7 @@ SOI_trigger_time: 0
 SOI_trigger_timeout: 10
 auto_connect_hiprfisr: true
 buffer_size_interval: 2
+callsign_prefix: FTN
 clear_log_file_on_startup: true
 color1: '#F4F4F4'
 color10: '#FEFEFE'
@@ -173,7 +174,7 @@ sensor_node_pub_port: 5061
 startup_automation_mode: Manual
 tak:
   cert: /home/user/Installed_by_FISSURE/takserver-docker-5.3-RELEASE-24/tak/certs/files/takserver.pem
-  connect_mode: disabled  # auto/manual/disabled
+  connect_mode: auto  # auto/manual/disabled
   ip_addr: localhost
   key: /home/user/Installed_by_FISSURE/takserver-docker-5.3-RELEASE-24/tak/certs/files/takserver.key
   port: 8089

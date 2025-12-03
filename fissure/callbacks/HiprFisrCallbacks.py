@@ -22,6 +22,7 @@ import tempfile
 import zipfile
 import importlib
 import traceback
+import zmq
 from fissure.Listeners import (
     MeshtasticListener,
     FilesystemListener,
@@ -222,6 +223,8 @@ async def shutdown(component: object, identifiers: List[str]):
     component.logger.info(f"received shutdown command for [{', '.join(identifiers)}]")
     for identifier in identifiers:
         if identifier == component.identifier:
+            # component.shutdown = True  # before or after?
+
             # forward 'Shutdown' command to PD and TSI)
             msg = {
                 fissure.comms.MessageFields.IDENTIFIER: component.identifier,
@@ -234,20 +237,20 @@ async def shutdown(component: object, identifiers: List[str]):
                 fissure.comms.MessageTypes.COMMANDS, msg, target_ids=[component.pd_id, component.tsi_id]
             )
 
-            pd_running = True
-            tsi_running = True
-            while pd_running or tsi_running:
-                msg = await component.backend_router.recv_msg()
+            # pd_running = True
+            # tsi_running = True
+            # while pd_running or tsi_running:
+            #     msg = await component.backend_router.recv_msg()
 
-                if msg is not None:
-                    msg_type = msg.get(fissure.comms.MessageFields.TYPE)
-                    msg_name = msg.get(fissure.comms.MessageFields.MESSAGE_NAME)
-                    sender = msg.get(fissure.comms.MessageFields.IDENTIFIER)
-                    if msg_type == fissure.comms.MessageTypes.STATUS and msg_name == "Shutting Down":
-                        if sender == fissure.comms.Identifiers.PD:
-                            pd_running = False
-                        if sender == fissure.comms.Identifiers.TSI:
-                            tsi_running = False
+            #     if msg is not None:
+            #         msg_type = msg.get(fissure.comms.MessageFields.TYPE)
+            #         msg_name = msg.get(fissure.comms.MessageFields.MESSAGE_NAME)
+            #         sender = msg.get(fissure.comms.MessageFields.IDENTIFIER)
+            #         if msg_type == fissure.comms.MessageTypes.STATUS and msg_name == "Shutting Down":
+            #             if sender == fissure.comms.Identifiers.PD:
+            #                 pd_running = False
+            #             if sender == fissure.comms.Identifiers.TSI:
+            #                 tsi_running = False
             component.shutdown = True
         else:
             # forward 'Shutdown' command to specified fissure component(s)
@@ -439,9 +442,17 @@ async def startPD(component: object, sensor_node_id=0):
     }
     await component.backend_router.send_msg(fissure.comms.MessageTypes.COMMANDS, msg, target_ids=[component.pd_id])
 
-    # Send Message to Sensor Node
-    if sensor_node_id >= 0:
-        await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def stopPD(component: object, sensor_node_id=0):
@@ -457,9 +468,17 @@ async def stopPD(component: object, sensor_node_id=0):
     }
     await component.backend_router.send_msg(fissure.comms.MessageTypes.COMMANDS, msg, target_ids=[component.pd_id])
 
-    # Send Message to Sensor Node
-    if sensor_node_id >= 0:
-        await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def pdBitsReturn(component: object, bits_message=""):
@@ -895,14 +914,25 @@ async def scanHardware(component: object, tab_index=0, hardware_list=[]):
     """
     Sends a message to a sensor node to scan for hardware information.
     """
-    # Forward the Message
-    PARAMETERS = {"tab_index": tab_index, "hardware_list": hardware_list}
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(tab_index)
+    if identity is None:
+        return
+
+    # Build message
+    PARAMETERS = {"hardware_list": hardware_list}
     msg = {
         fissure.comms.MessageFields.IDENTIFIER: component.identifier,
         fissure.comms.MessageFields.MESSAGE_NAME: "scanHardware",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[int(tab_index)].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def probeHardware(component: object, tab_index, table_row_text):
@@ -916,7 +946,18 @@ async def probeHardware(component: object, tab_index, table_row_text):
         fissure.comms.MessageFields.MESSAGE_NAME: "probeHardware",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[int(tab_index)].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(tab_index)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def guessHardware(component: object, tab_index=0, table_row=0, table_row_text=[], guess_index=0):
@@ -935,7 +976,18 @@ async def guessHardware(component: object, tab_index=0, table_row=0, table_row_t
         fissure.comms.MessageFields.MESSAGE_NAME: "guessHardware",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[int(tab_index)].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(tab_index)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def transferSensorNodeFile(
@@ -974,7 +1026,18 @@ async def transferSensorNodeFile(
         fissure.comms.MessageFields.MESSAGE_NAME: "transferSensorNodeFile",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def deleteArchiveReplayFiles(component: object, sensor_node_id=0):
@@ -988,7 +1051,18 @@ async def deleteArchiveReplayFiles(component: object, sensor_node_id=0):
         fissure.comms.MessageFields.MESSAGE_NAME: "deleteArchiveReplayFiles",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def refreshSensorNodeFiles(component: object, sensor_node_id=0, sensor_node_folder=""):
@@ -1002,7 +1076,18 @@ async def refreshSensorNodeFiles(component: object, sensor_node_id=0, sensor_nod
         fissure.comms.MessageFields.MESSAGE_NAME: "refreshSensorNodeFiles",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def deleteSensorNodeFile(component: object, sensor_node_id=0, sensor_node_file=""):
@@ -1016,7 +1101,18 @@ async def deleteSensorNodeFile(component: object, sensor_node_id=0, sensor_node_
         fissure.comms.MessageFields.MESSAGE_NAME: "deleteSensorNodeFile",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def downloadSensorNodeFile(component: object, sensor_node_id=0, sensor_node_file="", download_folder=""):
@@ -1034,7 +1130,18 @@ async def downloadSensorNodeFile(component: object, sensor_node_id=0, sensor_nod
         fissure.comms.MessageFields.MESSAGE_NAME: "downloadSensorNodeFile",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def overwriteDefaultAutorunPlaylist(component: object, sensor_node_id=0, playlist_dict={}):
@@ -1046,7 +1153,18 @@ async def overwriteDefaultAutorunPlaylist(component: object, sensor_node_id=0, p
         fissure.comms.MessageFields.MESSAGE_NAME: "overwriteDefaultAutorunPlaylist",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def autorunPlaylistStart(component: object, sensor_node_id=0, playlist_dict={}, trigger_values=[]):
@@ -1058,7 +1176,18 @@ async def autorunPlaylistStart(component: object, sensor_node_id=0, playlist_dic
         fissure.comms.MessageFields.MESSAGE_NAME: "autorunPlaylistStart",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def autorunPlaylistExecute(component: object, sensor_node_id=0, playlist_filename=""):
@@ -1070,7 +1199,18 @@ async def autorunPlaylistExecute(component: object, sensor_node_id=0, playlist_f
         fissure.comms.MessageFields.MESSAGE_NAME: "autorunPlaylistExecute",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def autorunPlaylistStop(component: object, sensor_node_id=0):
@@ -1082,7 +1222,18 @@ async def autorunPlaylistStop(component: object, sensor_node_id=0):
         fissure.comms.MessageFields.MESSAGE_NAME: "autorunPlaylistStop",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def physicalFuzzingStart(
@@ -1111,7 +1262,18 @@ async def physicalFuzzingStart(
         fissure.comms.MessageFields.MESSAGE_NAME: "physicalFuzzingStart",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def physicalFuzzingStop(component: object, sensor_node_id=0):
@@ -1123,7 +1285,18 @@ async def physicalFuzzingStop(component: object, sensor_node_id=0):
         fissure.comms.MessageFields.MESSAGE_NAME: "physicalFuzzingStop",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def multiStageAttackStart(
@@ -1158,7 +1331,18 @@ async def multiStageAttackStart(
         fissure.comms.MessageFields.MESSAGE_NAME: "multiStageAttackStart",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def multiStageAttackStop(component: object, sensor_node_id=0, autorun_index=0):
@@ -1176,7 +1360,18 @@ async def multiStageAttackStop(component: object, sensor_node_id=0, autorun_inde
         fissure.comms.MessageFields.MESSAGE_NAME: "multiStageAttackStop",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def archivePlaylistStart(
@@ -1219,7 +1414,18 @@ async def archivePlaylistStart(
         fissure.comms.MessageFields.MESSAGE_NAME: "archivePlaylistStart",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def archivePlaylistStop(component: object, sensor_node_id=0):
@@ -1233,7 +1439,18 @@ async def archivePlaylistStop(component: object, sensor_node_id=0):
         fissure.comms.MessageFields.MESSAGE_NAME: "archivePlaylistStop",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def attackFlowGraphStop(component: object, sensor_node_id=0, parameter="", autorun_index=0):
@@ -1247,7 +1464,18 @@ async def attackFlowGraphStop(component: object, sensor_node_id=0, parameter="",
         fissure.comms.MessageFields.MESSAGE_NAME: "attackFlowGraphStop",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def attackFlowGraphStart(
@@ -1278,7 +1506,18 @@ async def attackFlowGraphStart(
         fissure.comms.MessageFields.MESSAGE_NAME: "attackFlowGraphStart",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def iqFlowGraphStart(
@@ -1300,7 +1539,18 @@ async def iqFlowGraphStart(
         fissure.comms.MessageFields.MESSAGE_NAME: "iqFlowGraphStart",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def iqFlowGraphStop(component: object, sensor_node_id=0, parameter=""):
@@ -1315,7 +1565,18 @@ async def iqFlowGraphStop(component: object, sensor_node_id=0, parameter=""):
         fissure.comms.MessageFields.MESSAGE_NAME: "iqFlowGraphStop",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def inspectionFlowGraphStart(
@@ -1337,7 +1598,18 @@ async def inspectionFlowGraphStart(
         fissure.comms.MessageFields.MESSAGE_NAME: "inspectionFlowGraphStart",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def inspectionFlowGraphStop(component: object, sensor_node_id=0, parameter=""):
@@ -1351,7 +1623,18 @@ async def inspectionFlowGraphStop(component: object, sensor_node_id=0, parameter
         fissure.comms.MessageFields.MESSAGE_NAME: "inspectionFlowGraphStop",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def snifferFlowGraphStart(
@@ -1372,7 +1655,18 @@ async def snifferFlowGraphStart(
         fissure.comms.MessageFields.MESSAGE_NAME: "snifferFlowGraphStart",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def snifferFlowGraphStop(component: object, sensor_node_id=0, parameter=""):
@@ -1386,7 +1680,18 @@ async def snifferFlowGraphStop(component: object, sensor_node_id=0, parameter=""
         fissure.comms.MessageFields.MESSAGE_NAME: "snifferFlowGraphStop",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def startScapy(component: object, sensor_node_id=0, interface="", interval=0, loop=False, operating_system=""):
@@ -1406,7 +1711,18 @@ async def startScapy(component: object, sensor_node_id=0, interface="", interval
         fissure.comms.MessageFields.MESSAGE_NAME: "startScapy",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def stopScapy(component: object, sensor_node_id=0):
@@ -1418,7 +1734,18 @@ async def stopScapy(component: object, sensor_node_id=0):
         fissure.comms.MessageFields.MESSAGE_NAME: "stopScapy",  # ,
         # fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )    
 
 
 async def setVariable(component: object, sensor_node_id=0, flow_graph="", variable="", value=""):
@@ -1432,7 +1759,18 @@ async def setVariable(component: object, sensor_node_id=0, flow_graph="", variab
         fissure.comms.MessageFields.MESSAGE_NAME: "setVariable",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def protocolDiscoveryFG_Start(
@@ -1453,7 +1791,18 @@ async def protocolDiscoveryFG_Start(
         fissure.comms.MessageFields.MESSAGE_NAME: "protocolDiscoveryFG_Start",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )    
 
 
 async def protocolDiscoveryFG_Stop(component: object, sensor_node_id=0):
@@ -1467,7 +1816,18 @@ async def protocolDiscoveryFG_Stop(component: object, sensor_node_id=0):
         fissure.comms.MessageFields.MESSAGE_NAME: "protocolDiscoveryFG_Stop",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def updateConfiguration(
@@ -1499,7 +1859,18 @@ async def updateConfiguration(
     #     target_ids=[component.tsi_id],
     #     msg
     # )  # Future?
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )    
 
 
 async def startTSI_Detector(component: object, sensor_node_id=0, detector="", variable_names=[], variable_values=[], detector_port=0):
@@ -1526,7 +1897,18 @@ async def startTSI_Detector(component: object, sensor_node_id=0, detector="", va
     # component.backend_router.send_msg(
     #     fissure.comms.MessageTypes.COMMANDS, target_ids=[component.tsi_id], msg
     # )  # Future?
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def stopTSI_Detector(component: object, sensor_node_id=0):
@@ -1544,206 +1926,226 @@ async def stopTSI_Detector(component: object, sensor_node_id=0):
     # component.backend_router.send_msg(
     #     fissure.comms.MessageTypes.COMMANDS, msg, target_ids=[component.tsi_id]
     # )  # Future?
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )    
 
 
 async def terminateSensorNode(component: object, sensor_node_id):
     """
     Stops sensor_node.py for local operations.
     """
-    # Send to Sensor Node
     sensor_node_id = int(sensor_node_id)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+
+    # Send to Sensor Node
     msg = {
         fissure.comms.MessageFields.IDENTIFIER: component.identifier,
         fissure.comms.MessageFields.MESSAGE_NAME: "terminateSensorNode",
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
-
-    # Notify the Dashboard Immediately
-    component.sensor_nodes[sensor_node_id].connected = False
-    component.sensor_nodes[sensor_node_id].terminated = True  # To avoid heartbeat connection reset
-    component.heartbeats[fissure.comms.Identifiers.SENSOR_NODE][sensor_node_id] = None
-    PARAMETERS = {"component_name": sensor_node_id}
-    msg = {
-        fissure.comms.MessageFields.IDENTIFIER: component.identifier,
-        fissure.comms.MessageFields.MESSAGE_NAME: "componentDisconnected",
-        fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
-    }
-    await component.dashboard_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
-
-    # await asyncio.sleep(1)
-    # component.sensor_nodes[sensor_node_id].__del__()
-    # component.sensor_nodes[sensor_node_id].__init__()
-    # component.sensor_nodes[sensor_node_id] = None
-
-    # Close the HIPRFISR Socket
-    get_connections = component.sensor_nodes[sensor_node_id].listener.connections
-    connections_copy = set(get_connections)
-    for connection in connections_copy:
-        component.sensor_nodes[sensor_node_id].listener.disconnect(connection)
-    # component.sensor_nodes[sensor_node_id].listener.shutdown()
-
-    component.sensor_nodes[sensor_node_id] = None
-
-    # Shift Sensor Node Variables By One
-    for n in range(sensor_node_id, len(component.sensor_nodes) - 1):
-        component.sensor_nodes[n] = component.sensor_nodes[n + 1]
-        component.heartbeats[fissure.comms.Identifiers.SENSOR_NODE][n] = component.heartbeats[
-            fissure.comms.Identifiers.SENSOR_NODE
-        ][n + 1]
-        if component.sensor_nodes[n]:
-            component.sensor_nodes[n].connected = component.sensor_nodes[n + 1].connected
-            component.sensor_nodes[n].terminated = component.sensor_nodes[n + 1].terminated
-
-            if component.sensor_nodes[n + 1].connected is True:
-                msg = {
-                    fissure.comms.MessageFields.IDENTIFIER: component.identifier,
-                    fissure.comms.MessageFields.MESSAGE_NAME: "componentConnected",
-                    fissure.comms.MessageFields.PARAMETERS: str(n),
-                }
-                await component.dashboard_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
-
-
-async def connectToSensorNodeIP(component: object, sensor_node_id, ip_address, msg_port, hb_port, recall_settings):
-    """
-    Connects the HIPRFISR to a sensor node.
-    """
-    # Connect to Specified Sensor Node
-    sensor_node_id = int(sensor_node_id)
-
-    # Local
-    if ip_address == "ipc":
-        get_protocol = "ipc"
-        get_ip_address = "127.0.0.1"  # needs an address
-        get_hb_port = str(hb_port)
-        get_msg_port = str(msg_port)
-
-        # Reset Listener for Local Connections since Local Sensor Node Shuts Down Completely on Disconnect
-        await component.reset_sensor_node_listener(sensor_node_id, "IP")
-
-    # Remote
-    else:
-        get_protocol = "tcp"
-        get_ip_address = ip_address
-        get_hb_port = int(hb_port)
-        get_msg_port = int(msg_port)
-
-    sensor_node_address = fissure.comms.Address(
-        protocol=get_protocol, address=get_ip_address, hb_channel=get_hb_port, msg_channel=get_msg_port
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
     )
-    component.logger.info(f"connecting to HiprFisr @ {sensor_node_address}")
-
-    # Test Connection to Heartbeat Port
-    if ip_address != "ipc":
-        try:
-            with socket.create_connection((ip_address, hb_port), 10):
-                component.logger.info(f"PUB socket is listening on {ip_address}:{hb_port}")
-
-        # Timed Out
-        except:
-            component.logger.error(f"Failed to connect to {sensor_node_address}")
-            PARAMETERS = {"sensor_node_id": sensor_node_id}
-            msg = {
-                fissure.comms.MessageFields.IDENTIFIER: component.identifier,
-                fissure.comms.MessageFields.MESSAGE_NAME: "sensorNodeConnectTimeout",
-                fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
-            }
-            await component.dashboard_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
-            return
-
-    if component.sensor_nodes[sensor_node_id] is None:
-        await component.reset_sensor_node_listener(sensor_node_id, connection_type="IP")
-    connection_successful = await component.sensor_nodes[sensor_node_id].listener.connect(sensor_node_address, 15)
-    component.sensor_nodes[sensor_node_id].terminated = False
-
-    # Connected
-    if connection_successful:  # Always successful
-        # Recall Settings
-        if recall_settings == "True":
-            component.logger.info("Recalling settings...")
-            msg = {
-                fissure.comms.MessageFields.IDENTIFIER: component.identifier,
-                fissure.comms.MessageFields.MESSAGE_NAME: "recallSettings",
-            }
-            await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
 
 
-async def disconnectFromSensorNode(component: object, sensor_node_id=0, ip_address="", msg_port=0, hb_port=0, delete_node=False):
+async def nodeRefreshIP(component: object, dashboard_node_index):
     """
-    Ends connections to sensor_node.py during remote operation.
     """
-    # Notify the Dashboard Immediately
-    sensor_node_id = int(sensor_node_id)
-    component.sensor_nodes[sensor_node_id].connected = False
-    component.sensor_nodes[sensor_node_id].terminated = True  # To avoid heartbeat connection reset
-    PARAMETERS = {"component_name": sensor_node_id}
+    # For testing:
+    # component.nodes = {
+    #     "UUID-123": {
+    #         "uuid": "UUID-123",
+    #         "ip": "192.168.1.50",
+    #         "settings": {"nickname": "Node A"},
+    #         "network_type": "IP",
+    #         "last_seen": time.time(),
+    #         "connected": True
+    #     },
+    #     "UUID-456": {
+    #         "uuid": "UUID-456",
+    #         "ip": "10.0.0.15",
+    #         "settings": {"nickname": "Node B"},
+    #         "network_type": "Meshtastic",
+    #         "last_seen": time.time() - 12.3,
+    #         "connected": False
+    #     }
+    # }
+
+    # -----------------------------------------------------
+    # Notify dashboard
+    # -----------------------------------------------------
+    PARAMETERS = {
+        "dashboard_node_index": dashboard_node_index,
+        "nodes": component.nodes
+    }
+
+    msg_to_dashboard = {
+        fissure.comms.MessageFields.IDENTIFIER: component.identifier,
+        fissure.comms.MessageFields.MESSAGE_NAME: "nodeRefreshIP_Return",
+        fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
+    }
+
+    if component.dashboard_connected:
+        await component.dashboard_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg_to_dashboard)
+
+
+async def nodeSelectIP(component: object, dashboard_node_index, node_uuid):
+    """
+    """
+    # Lookup identity for this UUID
+    node_entry = component.nodes.get(node_uuid)
+    if not node_entry:
+        component.logger.error(f"[HIPRFISR] No such node_uuid {node_uuid}")
+        return
+
+    identity = node_entry["identity"]
+
+    # Send Message to Node
+    PARAMETERS = {
+        "dashboard_node_index": dashboard_node_index,
+        "node_uuid": node_uuid
+    }
+    msg = {
+        fissure.comms.MessageFields.IDENTIFIER: component.identifier,
+        fissure.comms.MessageFields.MESSAGE_NAME: "nodeSelectIP",
+        fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
+    }
+    await component.sensor_node_router.send_msg(fissure.comms.MessageTypes.COMMANDS, msg, target_ids=[identity])
+
+
+async def nodeReconnectIP(component: object, dashboard_node_index):
+    """
+    """
+    # Resolve UUID + identity
+    node_uuid, identity = component.resolve_sensor_node_identity(dashboard_node_index)
+    if not node_uuid:
+        return  # Helper already logged the problem
+
+    # Send Message to Node
+    PARAMETERS = {
+        "dashboard_node_index": dashboard_node_index,
+        "node_uuid": node_uuid
+    }
+    msg = {
+        fissure.comms.MessageFields.IDENTIFIER: component.identifier,
+        fissure.comms.MessageFields.MESSAGE_NAME: "nodeSelectIP",
+        fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
+    }
+    await component.sensor_node_router.send_msg(fissure.comms.MessageTypes.COMMANDS, msg, target_ids=[identity])
+
+
+async def disconnectFromSensorNode(component, dashboard_index=0, delete_node=False):
+    """
+    Dashboard callback: request disconnection of a Sensor Node.
+    """
+    dashboard_index = int(dashboard_index)
+
+    # 1) Resolve UUID + identity
+    uuid, identity = component.resolve_sensor_node_identity(dashboard_index)
+    if not uuid:
+        return  # Helper already logged the problem
+
+    # 2) Mark node as disconnected internally
+    node = component.nodes.get(uuid)
+    if node:
+        node["connected"] = False
+
+    # 3) Notify Dashboard immediately
     msg = {
         fissure.comms.MessageFields.IDENTIFIER: component.identifier,
         fissure.comms.MessageFields.MESSAGE_NAME: "componentDisconnected",
-        fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
+        fissure.comms.MessageFields.PARAMETERS: {"component_name": dashboard_index},
     }
-    await component.dashboard_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+    if component.dashboard_connected:
+        await component.dashboard_socket.send_msg(
+            fissure.comms.MessageTypes.COMMANDS,
+            msg
+        )
 
-    # Notify the Sensor Node
-    msg = {
-        fissure.comms.MessageFields.IDENTIFIER: component.identifier,
-        fissure.comms.MessageFields.MESSAGE_NAME: "hiprfisrDisconnecting",
-    }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+    # 4) Notify Sensor Node (if still reachable)
+    try:
+        msg2 = {
+            fissure.comms.MessageFields.IDENTIFIER: component.identifier,
+            fissure.comms.MessageFields.MESSAGE_NAME: "hiprfisrDisconnecting",
+            fissure.comms.MessageFields.PARAMETERS: {},
+        }
 
-    # Close the HIPRFISR Socket
-    get_connections = component.sensor_nodes[sensor_node_id].listener.connections
-    connections_copy = set(get_connections)
-    for connection in connections_copy:
-        component.sensor_nodes[sensor_node_id].listener.disconnect(connection)
-    # component.sensor_nodes[sensor_node_id].listener.shutdown()
+        await component.sensor_node_router.send_msg(
+            fissure.comms.MessageTypes.COMMANDS,
+            msg2,
+            target_ids=[identity]
+        )
+    except Exception:
+        pass
 
-    # Remove the Connection Permanently
-    if delete_node is True:
-        component.sensor_nodes[sensor_node_id] = None
+    # 5) Delete node entirely from HIPRFISR (optional)
+    if delete_node:
 
-        # Shift Sensor Node Variables By One
-        for n in range(sensor_node_id, len(component.sensor_nodes) - 1):
-            component.sensor_nodes[n] = component.sensor_nodes[n + 1]
-            component.heartbeats[fissure.comms.Identifiers.SENSOR_NODE][n] = component.heartbeats[
-                fissure.comms.Identifiers.SENSOR_NODE
-            ][n + 1]
-            if component.sensor_nodes[n]:
-                component.sensor_nodes[n].connected = component.sensor_nodes[n + 1].connected
-                component.sensor_nodes[n].terminated = component.sensor_nodes[n + 1].terminated
+        # Stop Local Sensor Node Program
+        if uuid == component.local_node_uuid:
+            msg3 = {
+                fissure.comms.MessageFields.IDENTIFIER: component.identifier,
+                fissure.comms.MessageFields.MESSAGE_NAME: "terminateSensorNode",
+                fissure.comms.MessageFields.PARAMETERS: {},
+            }
+            await component.sensor_node_router.send_msg(
+                fissure.comms.MessageTypes.COMMANDS,
+                msg3,
+                target_ids=[identity]
+            )
 
-                if component.sensor_nodes[n + 1].connected is True:
-                    msg = {
-                        fissure.comms.MessageFields.IDENTIFIER: component.identifier,
-                        fissure.comms.MessageFields.MESSAGE_NAME: "componentConnected",
-                        fissure.comms.MessageFields.PARAMETERS: str(n),
-                    }
-                    await component.dashboard_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+            # Remove UUID from HIPRFISR registry for local only
+            try:
+                del component.nodes[uuid]
+                component.logger.info(f"[DELETE] Removed node entry for UUID: {uuid}")
+            except KeyError:
+                component.logger.warning(f"[DELETE] UUID {uuid} not found in component.nodes")
 
+        # Clear heartbeat tracking
+        hb = component.heartbeats.get(fissure.comms.Identifiers.SENSOR_NODE, {})
 
-    # # Send to Sensor Node
-    # sensor_node_id = int(sensor_node_id)
-    # msg = {
-    #     fissure.comms.MessageFields.IDENTIFIER: component.identifier,
-    #     fissure.comms.MessageFields.MESSAGE_NAME: "terminateSensorNode",
-    # }
-    # await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+        if isinstance(hb, list):
+            for i, entry in enumerate(hb):
+                if isinstance(entry, dict):
+                    # Heartbeat stored using identity, not UUID
+                    if entry.get("uuid") == identity:
+                        hb[i] = None
+                        break
 
-    # # Notify the Dashboard Immediately
-    # component.sensor_nodes[sensor_node_id].connected = False
-    # component.sensor_nodes[sensor_node_id].terminated = True  # To avoid heartbeat connection reset
-    # component.heartbeats[fissure.comms.Identifiers.SENSOR_NODE][sensor_node_id] = None
-    # PARAMETERS = {"component_name": sensor_node_id}
-    # msg = {
-    #     fissure.comms.MessageFields.IDENTIFIER: component.identifier,
-    #     fissure.comms.MessageFields.MESSAGE_NAME: "componentDisconnected",
-    #     fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
-    # }
-    # await component.dashboard_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+        elif isinstance(hb, dict):
+            # If keyed by identity
+            hb.pop(identity, None)
+            # If keyed by UUID
+            hb.pop(uuid, None)
 
-    # await asyncio.sleep(1)
-    # component.sensor_nodes[sensor_node_id].__del__()
-    # component.sensor_nodes[sensor_node_id].__init__()
+        # Remove UUID from dashboard slot map
+        component.dashboard_node_map[dashboard_index] = None
+
+        # Shift remaining slots left (GUI ONLY)
+        for i in range(dashboard_index, len(component.dashboard_node_map) - 1):
+            component.dashboard_node_map[i] = component.dashboard_node_map[i + 1]
+
+        component.dashboard_node_map[-1] = None
+
+        # --------------------------------------
+        # E) Cleanup complete
+        # --------------------------------------
+        component.logger.info(f"[DELETE] Node {uuid} fully removed from HIPRFISR")
 
 
 async def disconnectFromMeshtastic(component: object, sensor_node_id=0):
@@ -1823,7 +2225,18 @@ async def findGPS_Coordinates(component: object, tab_index=0, gps_source="", for
         fissure.comms.MessageFields.MESSAGE_NAME: "findGPS_Coordinates",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[int(tab_index)].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(tab_index)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def gpsBeaconEnableDisableIP(component: object, sensor_node_id: str):
@@ -1837,7 +2250,18 @@ async def gpsBeaconEnableDisableIP(component: object, sensor_node_id: str):
         fissure.comms.MessageFields.MESSAGE_NAME: "gpsBeaconEnableDisableIP",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[int(sensor_node_id)].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def gpsBeaconRefreshIP(component: object, sensor_node_id: str):
@@ -1851,7 +2275,18 @@ async def gpsBeaconRefreshIP(component: object, sensor_node_id: str):
         fissure.comms.MessageFields.MESSAGE_NAME: "gpsBeaconRefreshIP",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[int(sensor_node_id)].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def rebootIP(component: object, sensor_node_id=0):
@@ -1865,7 +2300,18 @@ async def rebootIP(component: object, sensor_node_id=0):
         fissure.comms.MessageFields.MESSAGE_NAME: "rebootIP",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[int(sensor_node_id)].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def uptimeIP(component: object, sensor_node_id: str):
@@ -1879,7 +2325,18 @@ async def uptimeIP(component: object, sensor_node_id: str):
         fissure.comms.MessageFields.MESSAGE_NAME: "uptimeIP",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[int(sensor_node_id)].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )    
 
 
 async def memoryIP(component: object, sensor_node_id: str):
@@ -1893,7 +2350,18 @@ async def memoryIP(component: object, sensor_node_id: str):
         fissure.comms.MessageFields.MESSAGE_NAME: "memoryIP",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[int(sensor_node_id)].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def diskIP(component: object, sensor_node_id: str):
@@ -1907,7 +2375,18 @@ async def diskIP(component: object, sensor_node_id: str):
         fissure.comms.MessageFields.MESSAGE_NAME: "diskIP",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[int(sensor_node_id)].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
     
 async def cpuIP(component: object, sensor_node_id: str):
@@ -1921,7 +2400,18 @@ async def cpuIP(component: object, sensor_node_id: str):
         fissure.comms.MessageFields.MESSAGE_NAME: "cpuIP",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[int(sensor_node_id)].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
     
 async def processesIP(component: object, sensor_node_id: str):
@@ -1935,7 +2425,18 @@ async def processesIP(component: object, sensor_node_id: str):
         fissure.comms.MessageFields.MESSAGE_NAME: "processesIP",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[int(sensor_node_id)].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )    
 
     
 async def ifconfigIP(component: object, sensor_node_id: str):
@@ -1949,7 +2450,18 @@ async def ifconfigIP(component: object, sensor_node_id: str):
         fissure.comms.MessageFields.MESSAGE_NAME: "ifconfigIP",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[int(sensor_node_id)].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def iwconfigIP(component: object, sensor_node_id: str):
@@ -1963,7 +2475,18 @@ async def iwconfigIP(component: object, sensor_node_id: str):
         fissure.comms.MessageFields.MESSAGE_NAME: "iwconfigIP",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[int(sensor_node_id)].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )    
 
 
 ##########################################################################
@@ -2230,18 +2753,29 @@ async def flowGraphStarted(component: object, sensor_node_id=0, category=""):
     await component.dashboard_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
 
 
-async def recallSettingsReturn(component: object, settings_dict):
+async def recallSettingsReturn(component: object, dashboard_node_index, uuid, settings_dict):
     """
     Returns the recalled sensor node settings to the Dashboard.
     """
     # Send the Message
     PARAMETERS = {"settings_dict": settings_dict}
-    msg = {
+    msg1 = {
         fissure.comms.MessageFields.IDENTIFIER: component.identifier,
         fissure.comms.MessageFields.MESSAGE_NAME: "recallSettingsReturn",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.dashboard_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+    await component.dashboard_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg1)
+
+    # Send First Connected Message
+    component.dashboard_node_map[int(dashboard_node_index)] = uuid
+    component.nodes[uuid]["connected"] = True
+    PARAMETERS = {"component_name": dashboard_node_index}
+    msg2 = {
+        fissure.comms.MessageFields.IDENTIFIER: component.identifier,
+        fissure.comms.MessageFields.MESSAGE_NAME: "componentConnected",
+        fissure.comms.MessageFields.PARAMETERS: PARAMETERS
+    }
+    await component.dashboard_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg2)
 
 
 async def hardwareProbeResults(component: object, tab_index=0, output="", height_width=[]):
@@ -2258,10 +2792,16 @@ async def hardwareProbeResults(component: object, tab_index=0, output="", height
     await component.dashboard_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
 
 
-async def hardwareScanResults(component: object, tab_index=0, hardware_scan_results=[]):
+async def hardwareScanResults(component: object, uuid="", hardware_scan_results=[]):
     """
     Forwards the hardware scan results message to the Dashboard.
     """
+    # Resolve Dashboard Hardware Tab
+    node, tab_index = component.resolve_dashboard_target(uuid)
+    if tab_index is None:
+        return
+    
+    # Send Message
     PARAMETERS = {"tab_index": tab_index, "hardware_scan_results": hardware_scan_results}
     msg = {
         fissure.comms.MessageFields.IDENTIFIER: component.identifier,
@@ -2372,7 +2912,8 @@ async def alertReturn(component: object, sensor_node_id=0, alert_text=""):
     """
     Forwards alertReturn Message to the Dashboard.
     """
-    print(alert_text)
+    component.logger.info(alert_text)  # TODO: Provide cleaned up console text for alerts
+
     # Forward to Dashboard
     PARAMETERS = {
         "sensor_node_id": sensor_node_id,
@@ -2389,8 +2930,10 @@ async def alertReturn(component: object, sensor_node_id=0, alert_text=""):
 async def takPlot(component: object, uid: str, lat: float, lon: float, alt: float, time: str, remarks: str, type: str):
     """
     Forwards the GPS coordinate results message to TAK.
-    """   
-    await component.send_cot(uid, lat, lon, alt, time, remarks, type)
+    """
+    prefix = component.settings['callsign_prefix']
+    callsign = component.nodes[uid].get('callsign', f"{prefix}-{uid[:8]}")
+    await component.send_cot(uid, callsign, lat, lon, alt, time, remarks, type)
 
 
 async def takPlotGpsUpdate(component: object, uid: str, lat: float, lon: float, alt: float, time: str, remarks: str):
@@ -2399,7 +2942,11 @@ async def takPlotGpsUpdate(component: object, uid: str, lat: float, lon: float, 
     """
     time = time.replace(" ", "T")
     max_history = 5
-    await component.sensor_node_tracker.send_cot_gps_update(uid, lat, lon, alt, time, remarks, max_history)
+
+    prefix = component.settings['callsign_prefix']
+    callsign = component.nodes[uid].get('callsign', f"{prefix}-{uid[:8]}")
+
+    await component.sensor_node_tracker.send_cot_gps_update(uid, callsign, lat, lon, alt, time, remarks, max_history)
 
 
 async def exploit(component: object, sensor_node_id: str, protocol:str, modulation:str, hardware:str, type:str, attack:str, variables:str):
@@ -2757,7 +3304,18 @@ async def checkPlugin(component: object, sensor_node_id: int):
             fissure.comms.MessageFields.MESSAGE_NAME: "checkPlugin",
             fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
         }
-        await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+        # Resolve Identity
+        uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+        if identity is None:
+            return
+        
+        # Send through ROUTER
+        await component.sensor_node_router.send_msg(
+            fissure.comms.MessageTypes.COMMANDS,
+            msg,
+            target_ids=[identity]
+        )
 
     # Sensor node is local to HIPRFISR
     else:
@@ -2984,7 +3542,18 @@ async def transferPlugins(component: object, sensor_node_id: int, plugin_names: 
         fissure.comms.MessageFields.MESSAGE_NAME: "transferPlugins" if not install else "transferPluginsInstall",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def installPlugins(component: object, sensor_node_id: int, plugin_names: List[str]):
@@ -3010,7 +3579,18 @@ async def installPlugins(component: object, sensor_node_id: int, plugin_names: L
             fissure.comms.MessageFields.MESSAGE_NAME: "installPlugins",
             fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
         }
-        await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+        # Resolve Identity
+        uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+        if identity is None:
+            return
+        
+        # Send through ROUTER
+        await component.sensor_node_router.send_msg(
+            fissure.comms.MessageTypes.COMMANDS,
+            msg,
+            target_ids=[identity]
+        )        
 
     else:
         # Install Locally
@@ -3166,7 +3746,18 @@ async def uninstallPlugins(component: object, sensor_node_id: int, plugin_names:
             fissure.comms.MessageFields.MESSAGE_NAME: "uninstallPlugins",
             fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
         }
-        await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+        # Resolve Identity
+        uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+        if identity is None:
+            return
+        
+        # Send through ROUTER
+        await component.sensor_node_router.send_msg(
+            fissure.comms.MessageTypes.COMMANDS,
+            msg,
+            target_ids=[identity]
+        )
     
     else:
         # Uninstall locally
@@ -3201,7 +3792,18 @@ async def removePlugin(component: object, sensor_node_id: int, plugin_name: str)
         fissure.comms.MessageFields.MESSAGE_NAME: "removePlugin",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )    
     
 
 async def requestPluginNamesHiprfisr(component: object):
@@ -3533,7 +4135,19 @@ async def run_plugin_operation(component: object, sensor_node_id: int, plugin: s
         fissure.comms.MessageFields.MESSAGE_NAME: "run_plugin_operation",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )    
+
 
 async def stop_plugin_operation(component: object, sensor_node_id: int, operation_id: str):
     """Stop a running plugin operation on the sensor node.
@@ -3555,9 +4169,21 @@ async def stop_plugin_operation(component: object, sensor_node_id: int, operatio
         fissure.comms.MessageFields.MESSAGE_NAME: "stop_plugin_operation",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
 
-async def stop_all_plugin_operations(component: object, sensor_node_id: int=0):
+    # Resolve Identity
+    uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
+
+
+async def stop_all_plugin_operations(component: object, tak_uid: str, sensor_node_id: int=0):
     """Stop all running plugin operations on the sensor node.
 
     Parameters
@@ -3574,7 +4200,20 @@ async def stop_all_plugin_operations(component: object, sensor_node_id: int=0):
         fissure.comms.MessageFields.MESSAGE_NAME: "stop_all_plugin_operations",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    # uuid, identity = component.resolve_sensor_node_identity(sensor_node_id)
+    identity = component.nodes[tak_uid].get("identity", None)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
+
 
 async def sendPluginNamesTak(component: object, tak_uid: str, sensor_node_id: int=0):
     """Request Sensor Node plugin names for TAK
@@ -3597,7 +4236,19 @@ async def sendPluginNamesTak(component: object, tak_uid: str, sensor_node_id: in
         fissure.comms.MessageFields.MESSAGE_NAME: "sendPluginNamesTak",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    identity = component.nodes[tak_uid].get("identity", None)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
+
 
 async def sendPluginNamesTakResults(component: object, tak_uid: str, sensor_node_id: int, plugin_names: List[str]):
     """Handle Sensor Node plugin names for TAK
@@ -3670,7 +4321,18 @@ async def sendPluginActionNamesTak(component: object, tak_uid: str, plugin_name:
         fissure.comms.MessageFields.MESSAGE_NAME: "sendPluginActionNamesTak",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    identity = component.nodes[tak_uid].get("identity", None)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )
 
 
 async def sendPluginActionNamesTakResults(component: object, tak_uid: str, sensor_node_id: int, plugin_name: str, action_names: List[str]):
@@ -3752,7 +4414,18 @@ async def sendPluginActionTak(component: object, tak_uid: str, sensor_node_id: i
         fissure.comms.MessageFields.MESSAGE_NAME: "plugin_action",
         fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
     }
-    await component.sensor_nodes[sensor_node_id].listener.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
+    # Resolve Identity
+    identity = component.nodes[tak_uid].get("identity", None)
+    if identity is None:
+        return
+    
+    # Send through ROUTER
+    await component.sensor_node_router.send_msg(
+        fissure.comms.MessageTypes.COMMANDS,
+        msg,
+        target_ids=[identity]
+    )    
 
 
 async def pluginOperationStarted(component: object, sensor_node_id: int, operation_id: str, plugin: str, operation: str, parameters: dict):

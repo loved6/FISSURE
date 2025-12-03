@@ -45,7 +45,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)  # Scapy warnings
 IP_ADDRESS = "127.0.0.1"
 CERT_DIR = "certificates"
 
-DELAY = 0.5  # Seconds
+DELAY = 0.02  # Seconds
 
 
 def add_subdirectories_to_path(base_path):
@@ -82,21 +82,39 @@ def parse_args():
 
 
 def run(local_flag):
-    asyncio.run(main(local_flag))
+    try:
+        asyncio.run(main(local_flag))
+    except KeyboardInterrupt:
+        print("[FISSURE][Sensor Node] KeyboardInterrupt - exiting cleanly")
+    except SystemExit:
+        pass
 
 
 async def main(local_flag):
-    # Initialize Sensor Node
     print("[FISSURE][Sensor Node] start")
+
+    # ---------------------------------------------------------
+    # Initialize Sensor Node
+    # ---------------------------------------------------------
     sensor_node = SensorNode(local_flag)
 
-    # Start Heartbeat Loop
-    heartbeat_task = asyncio.create_task(sensor_node.heartbeat_loop())
+    # ---------------------------------------------------------
+    # Initialize communications (async DEALER connect)
+    # ---------------------------------------------------------
+    await sensor_node.initialize_comms()
 
-    # Start GPS Loop
+    # ---------------------------------------------------------
+    # Start Heartbeat Loop
+    # ---------------------------------------------------------
+    # heartbeat_task = asyncio.create_task(sensor_node.heartbeat_loop())
+
+    # ---------------------------------------------------------
+    # Start GPS Loop (if enabled)
+    # ---------------------------------------------------------
     gps_task = None
-    gps_manager = None 
-    if sensor_node.gps_autostart == True:
+    gps_manager = None
+
+    if sensor_node.gps_autostart:
         gps_manager = GPSManager(
             sensor_node.logger,
             gps_update_interval_seconds=sensor_node.gps_update_interval_seconds,
@@ -106,52 +124,53 @@ async def main(local_flag):
             meshtastic_lock=sensor_node.meshtastic_lock
         )
 
-        # Create Task
+        # Meshtastic GPS special handling
         if sensor_node.gps_source == "Meshtastic":
-            # Always use the serial connection for Meshtastic GPS,
-            # unless we're explicitly using the Meshtastic network type.
             if sensor_node.network_type == "Meshtastic":
                 gps_task = asyncio.create_task(
                     gps_manager.periodic_gps_update("Meshtastic", sensor_node.hiprfisr_socket)
                 )
             else:
-                # IP networking but Meshtastic GPS source → use direct serial connection
                 gps_task = asyncio.create_task(
                     gps_manager.periodic_gps_update("Meshtastic New Connection", sensor_node.meshtastic_serial_port)
                 )
-        
-        # gpsd, saved, internet
         else:
-            gps_task = asyncio.create_task(gps_manager.periodic_gps_update(sensor_node.gps_source, None))
-    
-    # Start Event Loop
+            # GPSD, saved position, or online IP lookup
+            gps_task = asyncio.create_task(
+                gps_manager.periodic_gps_update(sensor_node.gps_source, None)
+            )
+
+    # ---------------------------------------------------------
+    # Start Sensor Node Main Loop
+    # ---------------------------------------------------------
     try:
         await sensor_node.begin()
+
     finally:
-
-        # Ensure the Heartbeat Loop is Stopped
-        heartbeat_task.cancel()
-        try:
-            await heartbeat_task
-        except asyncio.CancelledError:
-            pass  # Heartbeat task was cancelled cleanly
-
-        # Ensure GPS Task is Stopped
+        # -----------------------------------------------------
+        # Stop GPS Task
+        # -----------------------------------------------------
         if gps_task:
             gps_task.cancel()
             try:
                 await gps_task
             except asyncio.CancelledError:
-                pass  # GPS task was cancelled cleanly
+                pass
 
-        # Stop GPS Manager if it exists
+        # -----------------------------------------------------
+        # Stop GPS Manager
+        # -----------------------------------------------------
         if gps_manager:
-            gps_manager.stop()  # Ensure GPS manager exits cleanly
+            gps_manager.stop()
 
-        # Clean Up and Exit
+        # -----------------------------------------------------
+        # Cleanup ZMQ
+        # -----------------------------------------------------
+        if not local_flag:
+            fissure.utils.zmq_cleanup()
+
         print("[FISSURE][Sensor Node] end")
-        fissure.utils.zmq_cleanup()
-        sys.exit()
+        return
 
 
 class SensorNode(object):
@@ -174,62 +193,50 @@ class SensorNode(object):
     #######################  FISSURE Functions  ########################
 
     def __init__(self, local_flag):
-        """ 
-        The start of the sensor node execution.
-        """
-        self.hiprfisr_connected = False
-        if local_flag == True:
-            self.local_remote = "local"
-        else:
-            self.local_remote = "remote"
+        # self.hiprfisr_connected = False
+        self.local_remote = "local" if local_flag else "remote"
 
-        # Read Stored Settings
         self.os_info = fissure.utils.get_os_info()
         filename = os.path.join(fissure.utils.SENSOR_NODE_DIR, "Sensor_Node_Config", "default.yaml")
         with open(filename) as yaml_library_file:
             self.settings_dict = yaml.load(yaml_library_file, yaml.FullLoader)
-        
-        # Main Networking Type to the HIPRFISR
+
         if self.local_remote == "local":
             self.network_type = "IP"
+            self.ip_address = "ipc"
         else:
-            self.network_type = str(self.settings_dict['Sensor Node']['network_type'])  # IP, Meshtastic, etc.
+            self.network_type = str(self.settings_dict['Sensor Node']['network_type'])
+            self.ip_address = str(self.settings_dict['Sensor Node']['ip_address'])
         
-        # Set Logging Levels
-        fissure.utils.init_logging()
-        self.updateLoggingLevels(self.settings_dict['Sensor Node']['console_logging_level'], self.settings_dict['Sensor Node']['file_logging_level'])  # Add these fields to the export, import, hardware configuration window
+        self.child_tasks = []
+        self.sockets = []
 
-        # Serial Values
+        fissure.utils.init_logging()
+        self.updateLoggingLevels(
+            self.settings_dict['Sensor Node']['console_logging_level'],
+            self.settings_dict['Sensor Node']['file_logging_level']
+        )
+
         self.gpsd_serial_port = str(self.settings_dict['Sensor Node']['gps']['gpsd_serial_port'])
         self.meshtastic_serial_port = str(self.settings_dict['Sensor Node']['meshtastic_serial_port'])
         self.meshtastic_serial_baud_rate = str(self.settings_dict['Sensor Node']['meshtastic_serial_baud_rate'])
 
-        # Initialize Connection/Heartbeat Variables
-        self.ip_address = str(self.settings_dict['Sensor Node']['ip_address'])
         self.heartbeats = {
-            self.identifier: 0,
-            #fissure.comms.Identifiers.SENSOR_NODE_0: 0,
-            fissure.comms.Identifiers.HIPRFISR: 0,
+            "self": 0.0,          # last time this node SENT a heartbeat
+            fissure.comms.Identifiers.HIPRFISR: 0.0       # last time this node RECEIVED a HIPRFISR heartbeat
         }
 
-        # Other Variables
-        self.heartbeat_interval = 5
+        self.heartbeat_interval = int(self.settings_dict['Sensor Node']['heartbeat_interval'])
         self.sensor_node_heartbeat_time = 0
         self.attack_flow_graph_loaded = False
         self.archive_flow_graph_loaded = False
         self.physical_fuzzing_stop_event = False
-
         self.attack_script_name = ""
         self.inspection_script_name = ""
-
         self.triggers_running = False
-
         self.alert_senders = {}
-        
-        # TSI
+
         self.tsi_detector_socket = None
-        #self.heartbeat_interval = 5
-        #self.tsi_heartbeat_time = 0
         self.running_TSI = False
         self.running_TSI_simulator = False
         self.blacklist = []
@@ -237,80 +244,93 @@ class SensorNode(object):
         self.configuration_update = False
         self.detector_script_name = ""
 
-        # PD
         self.running_PD = False
         self.pd_bits_socket = None
-        
-        # Check for Autorun
+
         self.autorun_playlist_thread = None
-        if self.settings_dict['Sensor Node']['autorun'] == True:
-            # Read the Autorun Playlist File
+        if self.settings_dict['Sensor Node']['autorun'] is True:
             filename = os.path.join(fissure.utils.SENSOR_NODE_DIR, "Autorun_Playlists", "default.yaml")
             with open(filename) as yaml_library_file:
                 playlist_dict = yaml.load(yaml_library_file, yaml.FullLoader)
                 trigger_dict = playlist_dict['trigger_values']
             self.autorunPlaylistStart('', playlist_dict, trigger_dict)
-            
-        # Create the Sensor Node ZMQ Nodes
-        self.initialize_comms()
+
+        # ZMQ DEALER/ROUTER fields
+        self.listener = None
+        self.connected = False
+        self.terminated = False
         self.shutdown = False
 
-        # Register Callbacks
+        # Use small UUID for Meshtastic to save characters
+        self.uuid = self.load_or_create_uuid()  # Read from file
+        if self.network_type == "Meshtastic":
+            self.identifier = self.uuid[:8]
+        else:
+            self.identifier = self.uuid
+
         self.register_callbacks(fissure.callbacks.GenericCallbacks)
         self.register_callbacks(fissure.callbacks.SensorNodeCallbacks)
         self.register_callbacks(fissure.callbacks.SensorNodeCallbacksLT)
-        
-        # Register plugin operation callbacks
+
         self.callbacks['run_plugin_operation'] = self.run_plugin_operation
         self.callbacks['stop_plugin_operation'] = self.stop_plugin_operation
         self.callbacks['stop_all_plugin_operations'] = self.stop_all_plugin_operations
         self.callbacks['plugin_action'] = self.plugin_action
 
-        # Initialize GPS Coordinates
         self.gps_autostart = self.settings_dict['Sensor Node']['gps']['gps_autostart']
         self.gps_tak_beacon = self.settings_dict['Sensor Node']['gps']['gps_tak_beacon']
         self.gps_source = self.settings_dict['Sensor Node']['gps']['gps_source']
         self.gps_update_interval_seconds = self.settings_dict['Sensor Node']['gps']['gps_update_interval_seconds']
 
-        # Prevent Multiple Calls to Serial Port with Meshtastic
         self.meshtastic_lock = asyncio.Lock()
 
-        # initial position from config file
         self.gps_position = self.settings_dict['Sensor Node']['gps']['gps_position']
-        self.gps_position['latitude_ddm'], self.gps_position['longitude_ddm'] = fissure.utils.common.decimal_to_ddm(self.gps_position['latitude'], self.gps_position['longitude'])
+        self.gps_position['latitude_ddm'], self.gps_position['longitude_ddm'] = \
+            fissure.utils.common.decimal_to_ddm(
+                self.gps_position['latitude'], self.gps_position['longitude']
+            )
 
-        # Initialize operations tracking
         self.operations = {}
 
 
-    def initialize_comms(self):
-        """
-        Creates the network nodes for IP or serial connections at the Sensor Node that connect to the HIPRFISR.
-        """
-        # IP
+    async def initialize_comms(self):
         if self.network_type == "IP":
-            sensor_node_msg_port = str(self.settings_dict['Sensor Node']['msg_port'])
-            sensor_node_hb_port = int(self.settings_dict['Sensor Node']['hb_port'])
-            
-            if self.local_remote == "local":
-                sensor_node_pair_address = fissure.comms.Address(protocol="ipc", address=self.ip_address, hb_channel="ipc:///tmp/zmq_ipc_heartbeat", msg_channel="ipc:///tmp/zmq_ipc_message")
-            else:
-                #sensor_node_pair_address = fissure.comms.Address(protocol="tcp", address=self.ip_address, hb_channel=5051, msg_channel=sensor_node_pair_port) 
-                sensor_node_pair_address = fissure.comms.Address(protocol="tcp", address=self.ip_address, hb_channel=sensor_node_hb_port, msg_channel=sensor_node_msg_port) 
 
-            self.hiprfisr_socket = fissure.comms.Server(
-                address=sensor_node_pair_address,
-                sock_type=zmq.PAIR,
+            # Build HIPRFISR address
+            if self.local_remote == "remote":
+                network_protocol = "tcp"
+            else:
+                network_protocol = "ipc"
+
+            self.hiprfisr_address = fissure.comms.Address(
+                protocol=network_protocol,
+                address=self.ip_address,
+                hb_channel=6100,  # TODO: pull from YAML anyway in case default is changed
+                msg_channel=6101,
+            )
+
+            # Single DEALER exactly like PD/TSI
+            self.hiprfisr_socket = fissure.comms.Listener(
+                sock_type=zmq.DEALER,
                 name=f"{self.identifier}::sensor_node",
             )
-            self.hiprfisr_socket.start()
 
-        # Serial
+            # Unique stable identity
+            identity = f"sensor-node-{self.identifier}-{uuid.uuid4()}"
+            self.socket_id = identity
+            self.hiprfisr_socket.set_identity(identity)
+
+            self.sockets.append(self.hiprfisr_socket)
+
+            # self.hiprfisr_connected = False
+
         elif self.network_type == "Meshtastic":
-            if self.meshtastic_serial_port is None:
-                raise ValueError("Meshtastic connection requires a serial port and context")
-
-            self.hiprfisr_socket = fissure.comms.FissureMeshtasticNode(self.meshtastic_serial_port, f"{self.identifier}::sensor_node", self)
+            self.hiprfisr_socket = None
+            self.pending_meshtastic_params = {
+                "serial_port": self.meshtastic_serial_port,
+                "name": f"{self.identifier}::sensor_node",
+                "context": self
+            }
 
 
     def register_callbacks(self, ctx: ModuleType):
@@ -324,6 +344,29 @@ class SensorNode(object):
         for cb_name, cb_func in callbacks:
             self.logger.debug(f"registered callback: {cb_name} (from {cb_func.__module__})")
             self.callbacks[cb_name] = cb_func
+    
+
+    def load_or_create_uuid(self):
+        # If the UUID file exists, reuse it
+        if self.local_remote == "local":
+            UUID_PATH = os.path.expanduser("~/.fissure/local_sensor_node_uuid.uuid")
+        else:
+            UUID_PATH = os.path.expanduser("~/.fissure/sensor_node_uuid.uuid")
+        if os.path.exists(UUID_PATH):
+            with open(UUID_PATH, "r") as f:
+                return f.read().strip()
+
+        # Otherwise create a new one
+        node_uuid = str(uuid.uuid4())
+
+        # Ensure the folder exists
+        os.makedirs(os.path.dirname(UUID_PATH), exist_ok=True)
+
+        # Save it for future runs
+        with open(UUID_PATH, "w") as f:
+            f.write(node_uuid)
+
+        return node_uuid
 
 
     async def send_alert(self, sensor_node_id: Union[int, str], opid: str, message: str, logger: None = None) -> None:
@@ -585,6 +628,7 @@ class SensorNode(object):
             self.logger.error(f"No callable run() method found in {plugin_script_path} OperationMain class")
             return
 
+
     async def stop_plugin_operation(self, component: object, operation_id: str, sensor_node_id: Union[int, str] = 0) -> None:
         """
         Stops a plugin operation on the Sensor Node.
@@ -639,6 +683,7 @@ class SensorNode(object):
         }
         await self.hiprfisr_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
 
+
     async def stop_all_plugin_operations(self, component: object, sensor_node_id: Union[int, str] = 0) -> None:
         """
         Stops all running plugin operations on the Sensor Node.
@@ -651,6 +696,7 @@ class SensorNode(object):
         self.logger.info("Stopping all plugin operations.")
         for operation_id in list(self.operations.keys()):
             await self.stop_plugin_operation(component, operation_id, sensor_node_id)
+
 
     async def plugin_action(self, component: object, plugin_name: str, action_name: str, parameters: Dict[str, Any] = {}, sensor_node_id: Union[int, str] = 0) -> None:
         """
@@ -711,157 +757,239 @@ class SensorNode(object):
             self.logger.error(f"Error in plugin_action for {plugin_name} - {action_name}: {e}\n{tb_str}")
             return
 
+
     async def shutdown_comms(self):
         """
         """
-        # Notify Dashboard Immediately
-        PARAMETERS = {"component_name": self.identifier}
-        msg = {            
-            fissure.comms.MessageFields.IDENTIFIER: self.identifier,
-            fissure.comms.MessageFields.MESSAGE_NAME: "componentDisconnected",
-            fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
-        }
-        await self.hiprfisr_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
-        time.sleep(DELAY * 2)
-        
-        # Future
-        PARAMETERS = {"component_name": self.identifier}
-        shutdown_notice = {            
-            fissure.comms.MessageFields.IDENTIFIER: self.identifier,
-            fissure.comms.MessageFields.MESSAGE_NAME: "shuttingDown",
-            fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
-        }
-        await self.hiprfisr_socket.send_msg(fissure.comms.MessageTypes.STATUS, shutdown_notice)
+        if self.tsi_detector_socket:
+            try:
+                self.stopTSI_Detector(-1)
+                await asyncio.sleep(2)
+            except:
+                pass
 
-        time.sleep(DELAY * 2)
-        self.hiprfisr_socket.shutdown()
+        if self.pd_bits_socket:
+            try:
+                self.stopPD(-1)
+                await asyncio.sleep(2)
+            except:
+                pass
+
+        if self.hiprfisr_socket:
+            try:
+                self.hiprfisr_socket.terminated = True
+                self.hiprfisr_socket.shutdown()
+                # self.hiprfisr_socket.close_sockets()
+            except:
+                pass
 
 
     async def heartbeat_loop(self):
         """
-        Sends and reads heartbeat messages, separate from event loop to prevent freezing on blocking events.
+        Sends periodic sensor-node heartbeats and checks if HIPRFISR is alive.
         """
-        # Start Heartbeat Loop
-        while self.shutdown is False:
-            await asyncio.sleep(DELAY)
+        while not self.shutdown:
+            await asyncio.sleep(0.25)
 
-            if self.hiprfisr_connected:
+            # 1. SEND node heartbeat (only if connected)
+            if self.network_type == "IP":  # and self.hiprfisr_connected:
                 try:
-                    await asyncio.wait_for(self.send_heartbeat(), timeout=10.0)
-                except asyncio.TimeoutError:
-                    self.hiprfisr_connected = False
-                    self.logger.warning("send_heartbeat() timed out")
-            
+                    await self.send_heartbeat()
+                except Exception:
+                    pass
+                    # self.hiprfisr_connected = False
+
+            # 2. RECEIVE heartbeat from HIPRFISR
             try:
-                await asyncio.wait_for(self.check_heartbeats(), timeout=10.0)
-            except asyncio.TimeoutError:
-                self.hiprfisr_connected = False
-                self.logger.warning("check_heartbeats() timed out")
+                await self.recv_heartbeat()
+            except Exception:
+                pass
+                # self.hiprfisr_connected = False
+
+            # # 3. CHECK timeout
+            # try:
+            #     await self.check_heartbeats()
+            # except Exception:
+            #     self.hiprfisr_connected = False
+
+
+    async def recv_heartbeat(self):
+        """
+        Receive Heartbeat Messages
+        """
+        heartbeat = await self.hiprfisr_socket.recv_heartbeat()
+
+        if heartbeat is not None:
+            heartbeat_time = float(heartbeat.get(fissure.comms.MessageFields.TIME))
+            self.heartbeats[fissure.comms.Identifiers.HIPRFISR] = heartbeat_time
+            self.logger.debug(f"received HiprFisr heartbeat ({fissure.utils.get_timestamp(heartbeat_time)})")
 
 
     async def begin(self):
         """
-        Main event loop for reading messages and terminating connections.
         """
         self.logger.info("=== STARTING SENSOR NODE ===")
-        while self.shutdown is False:
-            await asyncio.sleep(DELAY)
 
-            # FissureMeshtastic node has its own loop
-            if self.network_type == "IP":
+        # Connect to HIPRFISR (HB + MSG channels)
+        ok = await self.hiprfisr_socket.connect(self.hiprfisr_address)
 
-                # Process Incoming Messages
-                await self.read_hiprfisr_messages()
+        if ok:
+            self.logger.info(
+                f"Connected to HIPRFISR @ {self.hiprfisr_address}"
+            )
+            await asyncio.sleep(0.1)  # For ZMQ handshake to complete
+        else:
+            self.logger.error("FAILED connecting to HIPRFISR")
+            return
+        
+        # Start Heartbeat Loop
+        heartbeat_task = asyncio.create_task(self.heartbeat_loop())
+        self.child_tasks.append(heartbeat_task)
 
-                # Read Incoming TSI Wideband Messages
-                if self.tsi_detector_socket != None:
-                    await self.read_detector_messages()
+        # -----------------------------------------------------
+        # Main loop
+        # -----------------------------------------------------
+        try:
+            while not self.shutdown:
+                await asyncio.sleep(DELAY)
 
-                # Read Incoming PD Bits Messages
-                if self.pd_bits_socket != None:
-                    await self.read_pd_bits_messages()
+                if self.network_type == "IP":
+                    await self.read_hiprfisr_messages()
 
-        # Stop Alert Senders
-        for sender in self.alert_senders.values():
+                    if self.tsi_detector_socket:
+                        await self.read_detector_messages()
+
+                    if self.pd_bits_socket:
+                        await self.read_pd_bits_messages()
+
+        except asyncio.CancelledError:
+            raise
+
+        finally:
+            # Stop Heartbeat Task
+            heartbeat_task.cancel()
             try:
-                sender.stop()
-            except:
+                await heartbeat_task
+            except asyncio.CancelledError:
                 pass
-        self.alert_senders.clear()
 
-        # Clean up Sockets
-        # await self.shutdown_comms()
-        if self.tsi_detector_socket != None:
-            self.stopTSI_Detector(-1)
-            await asyncio.sleep(2)  # Causes non-critical error without sleep
+            # Cleanup
+            for sender in self.alert_senders.values():
+                try:
+                    sender.stop()
+                except:
+                    pass
 
-        if self.pd_bits_socket != None:
-            self.stopPD(-1)
-            await asyncio.sleep(2)
+            self.alert_senders.clear()
+    
+            # Close Running Tasks
+            for task in self.child_tasks:
+                task.cancel()
+            await asyncio.gather(*self.child_tasks, return_exceptions=True)
 
-        self.logger.info("=== SHUTDOWN ===")
-        # self.hiprfisr_socket.shutdown()
-        # fissure.utils.zmq_cleanup()
-        # sys.exit()
+            # Shut Down Comms
+            await self.shutdown_comms()
 
 
     async def read_hiprfisr_messages(self):
         """
-        Receive and parse messages from the Dashboard and carry out commands
+        Read messages from the ZMQ message channel.
         """
-        parsed = ""
-        while parsed is not None:
-            parsed = await self.hiprfisr_socket.recv_msg()
-            if parsed is not None:
-                self.hiprfisr_connected = True
-                msg_type = parsed.get(fissure.comms.MessageFields.TYPE)
-                name = parsed.get(fissure.comms.MessageFields.MESSAGE_NAME)
-                if msg_type == fissure.comms.MessageTypes.HEARTBEATS:
-                    heartbeat_time = float(parsed.get(fissure.comms.MessageFields.TIME))
-                    self.heartbeats[fissure.comms.Identifiers.HIPRFISR] = heartbeat_time
-                elif msg_type == fissure.comms.MessageTypes.COMMANDS:
+
+        # If already terminated, do not enter the loop at all.
+        if getattr(self.hiprfisr_socket, "terminated", False):
+            return
+
+        while True:
+            # Allow graceful exit when shutdown has been requested.
+            if self.shutdown or getattr(self.hiprfisr_socket, "terminated", False):
+                return
+
+            try:
+                parsed = await self.hiprfisr_socket.recv_msg()
+            except Exception:
+                # Socket error: mark terminated and exit the loop.
+                self.hiprfisr_socket.terminated = True
+                # self.hiprfisr_connected = False
+                return
+
+            if parsed is None:
+                # tiny sleep prevents a busy-loop at 100% CPU
+                await asyncio.sleep(0.01)
+                continue
+
+            # If we reach here, we actually received a real message.
+            # self.hiprfisr_connected = True
+
+            msg_type = parsed.get(fissure.comms.MessageFields.TYPE)
+
+            if msg_type == fissure.comms.MessageTypes.COMMANDS:
+                try:
                     await self.hiprfisr_socket.run_callback(self, parsed)
-                elif msg_type == fissure.comms.MessageTypes.STATUS:
-                        pass
-                else:
+                except Exception:
                     pass
+
+            elif msg_type == fissure.comms.MessageTypes.STATUS:
+                # you may add future handling, but nothing now
+                pass
+
+            else:
+                # unknown message type — ignore
+                pass
 
 
     async def send_heartbeat(self):
         """
-        Send Heartbeat Message
+        Sends a heartbeat to HIPRFISR (ROUTER) using the router identity.
         """
-        if self.network_type == "IP":
-            last_heartbeart = self.heartbeats[self.identifier]
-            now = time.time()
-            if (now - last_heartbeart) >= self.heartbeat_interval:
-                heartbeat = {
-                    fissure.comms.MessageFields.IDENTIFIER: self.identifier,
-                    fissure.comms.MessageFields.MESSAGE_NAME: fissure.comms.MessageFields.HEARTBEAT,
-                    fissure.comms.MessageFields.TIME: now,
-                    fissure.comms.MessageFields.IP: self.ip_address,
-                }
-                await self.hiprfisr_socket.send_heartbeat(heartbeat)
-                self.heartbeats[self.identifier] = now
+        if self.network_type != "IP":
+            return
+
+        now = time.time()
+        last = self.heartbeats["self"]
+
+        # throttle
+        if (now - last) < self.heartbeat_interval:
+            return
+
+        # Build the message
+        nickname = self.settings_dict.get("Sensor Node", {}).get("nickname", "-")
+        hb = {
+            fissure.comms.MessageFields.IDENTIFIER: self.identifier,
+            fissure.comms.MessageFields.MESSAGE_NAME: fissure.comms.MessageFields.HEARTBEAT,
+            fissure.comms.MessageFields.TIME: now,
+            fissure.comms.MessageFields.IP: self.ip_address,
+            fissure.comms.MessageFields.INTERVAL: self.heartbeat_interval,  # TODO: Get other components to send their interval? Update MessageTypes
+
+            fissure.comms.MessageFields.PARAMETERS: {
+                # "uuid": self.uuid,           # stable node uuid (the KEY in HIPRFISR)
+                "network_type": self.network_type,
+                "nickname": nickname,
+                # "socket_id": self.socket_id  # Gets detected by the ZMQ ROUTER/Receiver
+                #"settings": {} #self.settings_dict["Sensor Node"], On recall settings
+            }
+        }      
+
+        await self.hiprfisr_socket.send_heartbeat(hb)
+        self.heartbeats["self"] = now
+        self.logger.debug(f"Sent heartbeat at {now}")
 
 
-    async def check_heartbeats(self):
-        """
-        Check hearbeat and set connection flags accordingly
-        """
-        if self.network_type == "IP":
-            current_time = time.time()
-            cutoff_interval = 15.0  #float(self.settings.get("failure_multiple")) * float(self.settings.get("heartbeat_interval"))
-            cutoff_time = current_time - cutoff_interval
+    # async def check_heartbeats(self):
+    #     """
+    #     Watchdog for HIPRFISR connectivity.
+    #     """
+    #     now = time.time()
+    #     last = self.heartbeats[fissure.comms.Identifiers.HIPRFISR]
 
-            if self.heartbeats.get(fissure.comms.Identifiers.HIPRFISR) > 0:
-                last_heartbeat = self.heartbeats.get(fissure.comms.Identifiers.HIPRFISR)
-                # Failed heartbeat check while previously connected
-                if self.hiprfisr_connected and (last_heartbeat < cutoff_time):
-                    self.hiprfisr_connected = False
-                # Passed heartbeat check while previously disconnected
-                elif (not self.hiprfisr_connected) and (last_heartbeat > cutoff_time):
-                    self.hiprfisr_connected = True
+    #     hb_timeout = self.heartbeat_interval * 3
+
+    #     if (now - last) > hb_timeout:
+    #         # self.logger.warning(
+    #         #     f"No heartbeat from HIPRFISR for {now - last:.1f}s – marking disconnected"
+    #         # )
+    #         # self.hiprfisr_connected = False
+    #         print("SET TO FALSE!")
 
 
     def updateLoggingLevels(self, new_console_level="", new_file_level=""):
@@ -2984,7 +3112,8 @@ class SensorNode(object):
                     fissure.comms.MessageFields.MESSAGE_NAME: "takPlotGpsUpdateLT",
                     fissure.comms.MessageFields.PARAMETERS: PARAMETERS,
                 }
-                await self.hiprfisr_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)                
+                await self.hiprfisr_socket.send_msg(fissure.comms.MessageTypes.COMMANDS, msg)
+
 
     ########################################################################
 
